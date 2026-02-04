@@ -16,7 +16,7 @@ Core principles:
 
 - **Shell**: Tauri 2.0 + Rust
 - **Frontend**: Svelte 5 + TailwindCSS v4 (via Vite plugin)
-- **ASR**: Parakeet (with Whisper fallback)
+- **ASR**: Whisper (via whisper-rs/whisper.cpp) - models downloaded on first run
 - **Embeddings**: BGE-small (default), upgradeable to Nomic
 - **Vector DB**: SQLite + sqlite-vec
 - **LLM**: OpenAI / Ollama (user-configurable)
@@ -36,58 +36,87 @@ npm run tauri build
 # Type check Svelte
 npm run check
 
-# Format check
-npm run check:watch
+# Rust check only
+cd src-tauri && cargo check
 ```
+
+## Prerequisites
+
+- Node.js 18+
+- Rust (latest stable via rustup)
+- cmake (for whisper.cpp compilation): `brew install cmake`
 
 ## Architecture
 
 ```
 sidecar/
-├── src/                    # Svelte frontend
-│   ├── app.css             # TailwindCSS with custom theme
-│   ├── routes/             # SvelteKit pages
-│   └── lib/                # Components, stores, utilities
-├── src-tauri/              # Rust backend
+├── src/                      # Svelte frontend
+│   ├── app.css               # TailwindCSS with custom theme
+│   ├── routes/+page.svelte   # Main recording UI
+│   └── lib/components/       # Reusable components
+│       └── Setup.svelte      # First-run model download UI
+├── src-tauri/                # Rust backend
 │   └── src/
-│       ├── lib.rs          # Tauri app entry point
-│       ├── commands.rs     # IPC command handlers
-│       ├── audio/          # System audio capture (macOS/Windows)
-│       ├── asr/            # Speech recognition (Parakeet/Whisper)
-│       ├── embeddings/     # Text embedding generation
-│       ├── storage/        # SQLite + vector search
-│       ├── llm/            # OpenAI/Ollama clients
-│       └── detection/      # Meeting app detection
+│       ├── lib.rs            # Tauri app entry, state management
+│       ├── commands.rs       # IPC command handlers + AppState
+│       ├── audio/            # Audio capture via cpal
+│       ├── asr/              # Whisper transcription engine
+│       ├── models/           # Model download with progress events
+│       ├── embeddings/       # Text embedding generation
+│       ├── storage/          # SQLite + vector search
+│       ├── llm/              # OpenAI/Ollama clients
+│       └── detection/        # Meeting app detection
 ```
 
-## Key Design Decisions
+## Key Modules
 
-### Audio Capture
-- macOS: ScreenCaptureKit (requires user permission, no admin)
-- Windows: WASAPI loopback
+### Audio Capture (`src-tauri/src/audio/`)
+- Uses `cpal` crate for cross-platform audio input
+- Captures from default microphone (system audio requires additional setup)
+- Stores samples in thread-safe buffer
 
-### Transcription Pipeline
-1. Audio captured in 15-second sliding windows
-2. Each chunk transcribed locally via Parakeet
-3. Embeddings generated and stored in sqlite-vec
-4. Enables real-time RAG for Q&A
+### ASR (`src-tauri/src/asr/`)
+- Whisper models: tiny (75MB), base (142MB, recommended), small, medium, large
+- Models downloaded from HuggingFace on first run
+- Resampling to 16kHz via `rubato`
 
-### LLM Integration
-- OpenAI-compatible interface for both providers
-- Context window managed by selecting relevant chunks via vector search
-- Raw audio/full transcripts never leave device
+### Model Download (`src-tauri/src/models/`)
+- Downloads models to `~/Library/Application Support/com.sidecar.Sidecar/models/`
+- Emits `model-download-progress` events to frontend
 
-## Frontend Theme
+### Commands (`src-tauri/src/commands.rs`)
+- `start_recording` / `stop_recording` - Audio capture control
+- `download_model` - Download and load Whisper model
+- `check_model_status` - Check if model exists
+- `get_models_info` - List all available models
+- `ask_question` / `generate_summary` - LLM features (requires config)
 
-Custom Sidecar colors defined in `src/app.css`:
-- `bg-sidecar-bg` - Main background (#0a0a0b)
-- `bg-sidecar-surface` - Card/panel background (#141416)
-- `text-sidecar-text` - Primary text (#fafafa)
-- `text-sidecar-text-muted` - Secondary text (#71717a)
-- `bg-sidecar-accent` - Primary accent blue (#3b82f6)
+## Frontend
 
-## Platform Targets
+### Custom Theme (`src/app.css`)
+Colors defined in `@theme`:
+- `--color-sidecar-bg`: #0a0a0b (main background)
+- `--color-sidecar-surface`: #141416 (cards/panels)
+- `--color-sidecar-accent`: #3b82f6 (primary blue)
+- `--color-sidecar-danger`: #ef4444 (recording indicator)
 
-Primary: macOS and Windows (corporate deployments)
-- Windows is priority for corporate expansion
-- macOS uses user-level permissions only
+### State Management
+Uses Svelte 5 runes (`$state`, `$props`) for reactive state.
+
+## Tauri Events
+
+Listen for events from Rust:
+```typescript
+import { listen } from "@tauri-apps/api/event";
+
+// Model download progress
+await listen<DownloadProgress>("model-download-progress", (event) => {
+  console.log(event.payload.percentage);
+});
+```
+
+## Platform Notes
+
+- **macOS**: Microphone access requires user permission (granted at runtime)
+- **Windows**: WASAPI for audio, same permission model
+- Models stored in platform-specific app data directory
