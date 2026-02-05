@@ -4,27 +4,17 @@
   import { onMount, onDestroy } from "svelte";
   import Setup from "$lib/components/Setup.svelte";
   import Settings from "$lib/components/Settings.svelte";
+  import Sidebar from "$lib/components/Sidebar.svelte";
+  import TopBar from "$lib/components/TopBar.svelte";
+  import { meetingsStore } from "$lib/stores/meetings.svelte";
+  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View } from "$lib/types";
 
-  interface ModelStatus {
-    whisper_downloaded: boolean;
-    whisper_model: string;
-    whisper_size_mb: number;
-    models_dir: string;
-  }
-
-  interface TranscriptSegment {
-    id: string;
-    time: string;
-    text: string;
-    timestamp_ms: number;
-  }
-
-  interface TranscriptionEvent {
-    id: string;
-    text: string;
-    start_ms: number;
-    end_ms: number;
-    is_partial: boolean;
+  interface DownloadProgress {
+    model_name: string;
+    downloaded_bytes: number;
+    total_bytes: number;
+    percentage: number;
+    status: "Starting" | "Downloading" | "Completed" | "Failed" | "Cancelled";
   }
 
   // App state
@@ -39,11 +29,19 @@
   let isAsking = $state(false);
   let answer = $state("");
 
-  // Settings modal
-  let showSettings = $state(false);
+  // UI state
+  let currentView = $state<View>('home');
+  let sidebarCollapsed = $state(false);
+  let transcriptCollapsed = $state(false);
+  let downloadingModel = $state<string | null>(null);
+  let downloadProgress = $state<DownloadProgress | null>(null);
+  let unlistenDownload: UnlistenFn | null = null;
 
-  // Language indicator
+  // Settings/model state
   let currentLanguage = $state("en");
+  let currentModel = $state("base");
+  let models = $state<ModelInfo[]>([]);
+
   const languageNames: Record<string, string> = {
     auto: "Auto-detect",
     en: "English",
@@ -66,25 +64,20 @@
   let unlistenTranscription: UnlistenFn | null = null;
   let transcriptContainer: HTMLDivElement | null = null;
 
-  interface Settings {
-    llm_provider: string;
-    openai_api_key: string | null;
-    ollama_url: string | null;
-    ollama_model: string | null;
-    auto_detect_meetings: boolean;
-    whisper_model: string;
-    language: string;
-  }
-
   onMount(async () => {
     try {
       const status = await invoke<ModelStatus>("check_model_status");
       needsSetup = !status.whisper_downloaded;
 
-      // Load current settings to get language
+      // Load current settings and models
       try {
-        const settings = await invoke<Settings>("get_settings");
+        const [settings, loadedModels] = await Promise.all([
+          invoke<SettingsType>("get_settings"),
+          invoke<ModelInfo[]>("get_models_info"),
+        ]);
         currentLanguage = settings.language;
+        currentModel = settings.whisper_model;
+        models = loadedModels;
       } catch (e) {
         console.error("Failed to load settings:", e);
       }
@@ -112,6 +105,9 @@
     if (unlistenTranscription) {
       unlistenTranscription();
     }
+    if (unlistenDownload) {
+      unlistenDownload();
+    }
   });
 
   // Format milliseconds to MM:SS
@@ -135,8 +131,11 @@
         timestamp_ms: data.start_ms,
       };
 
-      // Add to transcript
+      // Add to local transcript
       transcript = [...transcript, segment];
+
+      // Also add to active meeting
+      meetingsStore.addTranscriptSegment(segment);
 
       // Auto-scroll to bottom
       requestAnimationFrame(() => {
@@ -184,6 +183,7 @@
         // Update with final transcript from backend (includes any remaining segments)
         if (result.length > 0) {
           transcript = result;
+          meetingsStore.setTranscript(result);
         }
       } catch (e) {
         console.error("Failed to stop recording:", e);
@@ -195,6 +195,9 @@
         transcript = [];
         answer = "";
         recordingDuration = 0;
+
+        // Create a new meeting
+        meetingsStore.createMeeting();
 
         // Start listening for transcription events BEFORE starting recording
         await startTranscriptionListener();
@@ -227,20 +230,111 @@
     question = "";
   }
 
-  function openSettings() {
-    showSettings = true;
+  function handleNavigate(view: View) {
+    currentView = view;
   }
 
-  async function closeSettings() {
-    showSettings = false;
-    // Refresh language after settings might have changed
+  function handleSelectMeeting(id: string) {
+    meetingsStore.setActive(id);
+    const meeting = meetingsStore.meetings.find(m => m.id === id);
+    if (meeting) {
+      transcript = meeting.transcript;
+    }
+    currentView = 'home';
+  }
+
+  async function handleLanguageChange(lang: string) {
+    currentLanguage = lang;
     try {
-      const settings = await invoke<Settings>("get_settings");
+      const settings = await invoke<SettingsType>("get_settings");
+      settings.language = lang;
+      await invoke("save_settings", { settings });
+      await invoke("load_model", { modelName: currentModel });
+    } catch (e) {
+      console.error("Failed to save language:", e);
+    }
+  }
+
+  async function handleModelChange(model: string) {
+    currentModel = model;
+    try {
+      const settings = await invoke<SettingsType>("get_settings");
+      settings.whisper_model = model;
+      await invoke("save_settings", { settings });
+      await invoke("load_model", { modelName: model });
+      // Refresh models list
+      models = await invoke<ModelInfo[]>("get_models_info");
+    } catch (e) {
+      console.error("Failed to change model:", e);
+    }
+  }
+
+  async function handleDownloadModel(modelName: string) {
+    downloadingModel = modelName;
+    downloadProgress = null;
+
+    try {
+      // Listen for download progress events
+      unlistenDownload = await listen<DownloadProgress>("model-download-progress", (event) => {
+        downloadProgress = event.payload;
+        if (event.payload.status === "Completed") {
+          // Download complete, update state
+          setTimeout(async () => {
+            currentModel = modelName;
+            models = await invoke<ModelInfo[]>("get_models_info");
+            downloadingModel = null;
+            downloadProgress = null;
+            if (unlistenDownload) {
+              unlistenDownload();
+              unlistenDownload = null;
+            }
+          }, 500);
+        } else if (event.payload.status === "Failed") {
+          downloadingModel = null;
+          downloadProgress = null;
+          if (unlistenDownload) {
+            unlistenDownload();
+            unlistenDownload = null;
+          }
+        }
+      });
+
+      // Download and load the model
+      await invoke("download_model", { modelName });
+      // Update settings
+      const settings = await invoke<SettingsType>("get_settings");
+      settings.whisper_model = modelName;
+      await invoke("save_settings", { settings });
+    } catch (e) {
+      console.error("Failed to download model:", e);
+      downloadingModel = null;
+      downloadProgress = null;
+      if (unlistenDownload) {
+        unlistenDownload();
+        unlistenDownload = null;
+      }
+    }
+  }
+
+  async function handleSettingsSaved() {
+    // Refresh settings after save
+    try {
+      const [settings, loadedModels] = await Promise.all([
+        invoke<SettingsType>("get_settings"),
+        invoke<ModelInfo[]>("get_models_info"),
+      ]);
       currentLanguage = settings.language;
+      currentModel = settings.whisper_model;
+      models = loadedModels;
     } catch (e) {
       console.error("Failed to refresh settings:", e);
     }
+    currentView = 'home';
   }
+
+  // Derived values for sidebar
+  let pinnedMeetings = $derived(meetingsStore.getPinnedMeetings());
+  let recentMeetings = $derived(meetingsStore.getRecentMeetings());
 </script>
 
 {#if isLoading}
@@ -250,172 +344,238 @@
 {:else if needsSetup}
   <Setup onComplete={handleSetupComplete} />
 {:else}
-  <main class="flex flex-col h-screen p-6 no-select bg-sidecar-bg">
-    <!-- Header -->
-    <header class="flex items-center justify-between mb-6">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-sidecar-accent flex items-center justify-center">
-          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-          </svg>
-        </div>
-        <h1 class="text-xl font-semibold text-sidecar-text">Sidecar</h1>
-      </div>
+  <div class="flex h-screen bg-sidecar-bg no-select">
+    <!-- Sidebar -->
+    <Sidebar
+      collapsed={sidebarCollapsed}
+      {currentView}
+      {pinnedMeetings}
+      {recentMeetings}
+      activeMeetingId={meetingsStore.activeMeetingId}
+      onToggle={() => sidebarCollapsed = !sidebarCollapsed}
+      onNavigate={handleNavigate}
+      onSelectMeeting={handleSelectMeeting}
+      onRenameMeeting={(id, title) => meetingsStore.renameMeeting(id, title)}
+      onTogglePinMeeting={(id) => meetingsStore.togglePin(id)}
+      onDeleteMeeting={(id) => meetingsStore.deleteMeeting(id)}
+    />
 
-      <div class="flex items-center gap-2">
-        <!-- Language Indicator -->
-        <button
-          onclick={openSettings}
-          class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-sidecar-surface border border-sidecar-border hover:border-sidecar-text-muted transition-colors"
-          title="Change language"
-        >
-          <svg class="w-4 h-4 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-          </svg>
-          <span class="text-xs font-medium text-sidecar-text">{languageNames[currentLanguage] || currentLanguage}</span>
-          <svg class="w-3 h-3 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <!-- Top Bar -->
+      <TopBar
+        language={currentLanguage}
+        currentModel={currentModel}
+        {models}
+        onLanguageChange={handleLanguageChange}
+        onModelChange={handleModelChange}
+        onDownloadModel={handleDownloadModel}
+      />
 
-        <!-- Settings Button -->
-        <button
-          onclick={openSettings}
-          class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
-          title="Settings"
-        >
-          <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        </button>
-      </div>
-    </header>
+      <!-- Content Area -->
+      <div class="flex-1 flex flex-col overflow-hidden">
+        {#if currentView === 'home'}
+          <div class="flex-1 flex flex-col p-6 overflow-hidden">
+            <!-- Recording Control -->
+            <div class="flex flex-col items-center justify-center py-6">
+              <div class="relative">
+                <!-- Outer ring pulse when recording -->
+                {#if isRecording}
+                  <div class="absolute inset-0 rounded-full bg-sidecar-danger/30 animate-ring-pulse"></div>
+                  <div class="absolute inset-0 rounded-full bg-sidecar-danger/20 animate-ring-pulse" style="animation-delay: 0.5s"></div>
+                {/if}
 
-    <!-- Recording Control -->
-    <div class="flex flex-col items-center justify-center py-8">
-      <div class="relative">
-        <!-- Outer ring pulse when recording -->
-        {#if isRecording}
-          <div class="absolute inset-0 rounded-full bg-sidecar-danger/30 animate-ring-pulse"></div>
-          <div class="absolute inset-0 rounded-full bg-sidecar-danger/20 animate-ring-pulse" style="animation-delay: 0.5s"></div>
-        {/if}
+                <button
+                  onclick={toggleRecording}
+                  class="relative w-20 h-20 rounded-full transition-all duration-300 btn-shine {isRecording
+                    ? 'bg-gradient-danger animate-recording-glow'
+                    : 'bg-gradient-accent animate-idle-glow hover:scale-105'}"
+                >
+                  {#if isRecording}
+                    <svg class="w-7 h-7 mx-auto text-white relative z-10" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  {:else}
+                    <svg class="w-7 h-7 mx-auto text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="6" />
+                    </svg>
+                  {/if}
+                </button>
+              </div>
 
-        <button
-          onclick={toggleRecording}
-          class="relative w-24 h-24 rounded-full transition-all duration-300 btn-shine {isRecording
-            ? 'bg-gradient-danger animate-recording-glow'
-            : 'bg-gradient-accent animate-idle-glow hover:scale-105'}"
-        >
-          {#if isRecording}
-            <svg class="w-8 h-8 mx-auto text-white relative z-10" fill="currentColor" viewBox="0 0 24 24">
-              <rect x="6" y="6" width="12" height="12" rx="2" />
-            </svg>
-          {:else}
-            <svg class="w-8 h-8 mx-auto text-white" fill="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="6" />
-            </svg>
-          {/if}
-        </button>
-      </div>
+              <p class="mt-3 text-sm text-sidecar-text-muted">
+                {#if isRecording}
+                  Recording <span class="font-mono text-sidecar-danger font-semibold">{formatDuration(recordingDuration)}</span>
+                {:else}
+                  Click to start recording
+                {/if}
+              </p>
+            </div>
 
-      <p class="mt-4 text-sm text-sidecar-text-muted">
-        {#if isRecording}
-          Recording <span class="font-mono text-sidecar-danger font-semibold">{formatDuration(recordingDuration)}</span>
-        {:else}
-          Click to start recording
-        {/if}
-      </p>
-    </div>
+            <!-- Transcript Area -->
+            <div class="flex-1 flex flex-col min-h-0">
+              <!-- Collapsible Header -->
+              <button
+                onclick={() => transcriptCollapsed = !transcriptCollapsed}
+                class="flex items-center justify-between mb-3 group"
+              >
+                <div class="flex items-center gap-2">
+                  <svg
+                    class="w-4 h-4 text-sidecar-text-muted transition-transform {transcriptCollapsed ? '-rotate-90' : ''}"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                  <h2 class="text-sm font-medium text-sidecar-text-muted uppercase tracking-wide">Live Transcript</h2>
+                </div>
+                {#if transcript.length > 0}
+                  <span class="text-xs text-sidecar-text-muted">{transcript.length} segments</span>
+                {/if}
+              </button>
 
-    <!-- Transcript Area -->
-    <div class="flex-1 flex flex-col min-h-0">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-medium text-sidecar-text-muted uppercase tracking-wide">Live Transcript</h2>
-        {#if transcript.length > 0}
-          <span class="text-xs text-sidecar-text-muted">{transcript.length} segments</span>
-        {/if}
-      </div>
+              {#if !transcriptCollapsed}
+                <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-hidden shadow-glow-surface transition-all duration-200">
+                  {#if transcript.length === 0}
+                    <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
+                      <div class="w-14 h-14 mb-4 rounded-2xl bg-sidecar-surface/50 flex items-center justify-center">
+                        <svg class="w-7 h-7 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <p class="text-sm font-medium">
+                        {isRecording ? "Listening..." : "No transcript yet"}
+                      </p>
+                      <p class="text-xs mt-1 opacity-70">
+                        {isRecording ? "Speech will appear here in real-time" : "Start recording to capture audio"}
+                      </p>
+                    </div>
+                  {:else}
+                    <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
+                      {#each transcript as segment (segment.id)}
+                        <div class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-sidecar-surface/50 transition-colors">
+                          <span class="text-xs text-sidecar-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
+                          <p class="text-sm leading-relaxed text-sidecar-text">{segment.text}</p>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {:else}
+                <div class="py-2 text-sm text-sidecar-text-muted">
+                  {transcript.length > 0 ? `${transcript.length} segments captured` : 'No transcript yet'}
+                </div>
+              {/if}
+            </div>
 
-      <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-hidden shadow-glow-surface">
-        {#if transcript.length === 0}
-          <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
-            <div class="w-16 h-16 mb-4 rounded-2xl bg-sidecar-surface/50 flex items-center justify-center">
-              <svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            <!-- Answer Display -->
+            {#if answer}
+              <div class="mt-4 p-4 glass rounded-xl border border-sidecar-border shadow-glow-accent">
+                <div class="flex items-center gap-2 mb-2">
+                  <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
+                    <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">AI Answer</h3>
+                </div>
+                <p class="text-sm text-sidecar-text whitespace-pre-wrap leading-relaxed">{answer}</p>
+              </div>
+            {/if}
+
+            <!-- Q&A Input -->
+            <div class="mt-4">
+              <form
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  askQuestion();
+                }}
+                class="flex gap-2"
+              >
+                <input
+                  type="text"
+                  bind:value={question}
+                  placeholder="Ask a question about the meeting..."
+                  disabled={transcript.length === 0}
+                  class="flex-1 px-4 py-3 glass border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent focus:shadow-glow-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                <button
+                  type="submit"
+                  disabled={!question.trim() || isAsking || transcript.length === 0}
+                  class="px-5 py-3 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
+                >
+                  {#if isAsking}
+                    <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                  {:else}
+                    Ask
+                  {/if}
+                </button>
+              </form>
+            </div>
+          </div>
+
+        {:else if currentView === 'genie'}
+          <div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
+            <div class="w-16 h-16 mb-4 rounded-2xl bg-sidecar-purple/20 flex items-center justify-center">
+              <svg class="w-8 h-8 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
               </svg>
             </div>
-            <p class="text-sm font-medium">
-              {isRecording ? "Listening..." : "No transcript yet"}
-            </p>
-            <p class="text-xs mt-1 opacity-70">
-              {isRecording ? "Speech will appear here in real-time" : "Start recording to capture audio"}
+            <h2 class="text-xl font-semibold text-sidecar-text mb-2">Genie AI Assistant</h2>
+            <p class="text-sm text-sidecar-text-muted max-w-md">
+              Coming soon! Ask Genie to summarize meetings, extract action items, and answer questions about your recorded sessions.
             </p>
           </div>
+
+        {:else if currentView === 'settings'}
+          <div class="flex-1 overflow-y-auto">
+            <Settings onClose={handleSettingsSaved} inline={true} />
+          </div>
+        {/if}
+      </div>
+    </main>
+  </div>
+
+  <!-- Download Progress Overlay -->
+  {#if downloadingModel}
+    <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
+      <div class="bg-sidecar-surface rounded-2xl border border-sidecar-border p-6 w-80 shadow-glow-surface">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-xl bg-sidecar-accent/20 flex items-center justify-center">
+            <svg class="w-5 h-5 text-sidecar-accent animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-sidecar-text">Downloading Model</h3>
+            <p class="text-xs text-sidecar-text-muted capitalize">{downloadingModel}</p>
+          </div>
+        </div>
+
+        {#if downloadProgress}
+          <div class="space-y-2">
+            <div class="h-2 bg-sidecar-border rounded-full overflow-hidden">
+              <div
+                class="h-full bg-gradient-accent transition-all duration-300"
+                style="width: {downloadProgress.percentage}%"
+              ></div>
+            </div>
+            <div class="flex justify-between text-xs text-sidecar-text-muted">
+              <span>{downloadProgress.status}</span>
+              <span>{downloadProgress.percentage.toFixed(0)}%</span>
+            </div>
+          </div>
         {:else}
-          <div bind:this={transcriptContainer} class="p-4 space-y-3 overflow-y-auto h-full scroll-smooth">
-            {#each transcript as segment (segment.id)}
-              <div class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-sidecar-surface/50 transition-colors">
-                <span class="text-xs text-sidecar-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
-                <p class="text-sm leading-relaxed text-sidecar-text">{segment.text}</p>
-              </div>
-            {/each}
+          <div class="flex items-center justify-center py-2">
+            <div class="w-5 h-5 border-2 border-sidecar-accent border-t-transparent rounded-full animate-spin"></div>
+            <span class="ml-2 text-sm text-sidecar-text-muted">Preparing...</span>
           </div>
         {/if}
       </div>
     </div>
-
-    <!-- Answer Display -->
-    {#if answer}
-      <div class="mt-4 p-4 glass rounded-xl border border-sidecar-border shadow-glow-accent">
-        <div class="flex items-center gap-2 mb-2">
-          <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
-            <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">AI Answer</h3>
-        </div>
-        <p class="text-sm text-sidecar-text whitespace-pre-wrap leading-relaxed">{answer}</p>
-      </div>
-    {/if}
-
-    <!-- Q&A Input -->
-    <div class="mt-4">
-      <form
-        onsubmit={(e) => {
-          e.preventDefault();
-          askQuestion();
-        }}
-        class="flex gap-2"
-      >
-        <input
-          type="text"
-          bind:value={question}
-          placeholder="Ask a question about the meeting..."
-          disabled={transcript.length === 0}
-          class="flex-1 px-4 py-3 glass border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent focus:shadow-glow-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        />
-        <button
-          type="submit"
-          disabled={!question.trim() || isAsking || transcript.length === 0}
-          class="px-5 py-3 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
-        >
-          {#if isAsking}
-            <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-          {:else}
-            Ask
-          {/if}
-        </button>
-      </form>
-    </div>
-  </main>
-
-  <!-- Settings Modal -->
-  {#if showSettings}
-    <Settings onClose={closeSettings} />
   {/if}
 {/if}
