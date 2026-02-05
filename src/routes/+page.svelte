@@ -7,7 +7,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
-  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View } from "$lib/types";
+  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary } from "$lib/types";
 
   interface DownloadProgress {
     model_name: string;
@@ -28,6 +28,10 @@
   let question = $state("");
   let isAsking = $state(false);
   let answer = $state("");
+
+  // Summary state
+  let isGeneratingSummary = $state(false);
+  let summary = $state<Summary | null>(null);
 
   // UI state
   let currentView = $state<View>('home');
@@ -194,6 +198,7 @@
         // Clear previous state
         transcript = [];
         answer = "";
+        summary = null;
         recordingDuration = 0;
 
         // Create a new meeting
@@ -228,6 +233,21 @@
 
     isAsking = false;
     question = "";
+  }
+
+  async function generateSummary() {
+    if (isGeneratingSummary || transcript.length === 0) return;
+    isGeneratingSummary = true;
+    summary = null;
+
+    try {
+      summary = await invoke<Summary>("generate_summary");
+    } catch (e) {
+      // Show error in answer field as fallback
+      answer = `Summary Error: ${e}`;
+    }
+
+    isGeneratingSummary = false;
   }
 
   function handleNavigate(view: View) {
@@ -469,6 +489,52 @@
               {/if}
             </div>
 
+            <!-- Summary Display -->
+            {#if summary}
+              <div class="mt-4 p-4 glass rounded-xl border border-sidecar-border shadow-glow-surface">
+                <div class="flex items-center gap-2 mb-3">
+                  <div class="w-5 h-5 rounded-full bg-sidecar-purple flex items-center justify-center">
+                    <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">Meeting Summary</h3>
+                </div>
+
+                {#if summary.overview}
+                  <p class="text-sm text-sidecar-text leading-relaxed mb-4">{summary.overview}</p>
+                {/if}
+
+                {#if summary.key_points.length > 0}
+                  <div class="mb-3">
+                    <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Key Points</h4>
+                    <ul class="space-y-1">
+                      {#each summary.key_points as point}
+                        <li class="flex items-start gap-2 text-sm text-sidecar-text">
+                          <span class="text-sidecar-accent mt-1">•</span>
+                          <span>{point}</span>
+                        </li>
+                      {/each}
+                    </ul>
+                  </div>
+                {/if}
+
+                {#if summary.action_items.length > 0}
+                  <div>
+                    <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Action Items</h4>
+                    <ul class="space-y-1">
+                      {#each summary.action_items as item}
+                        <li class="flex items-start gap-2 text-sm text-sidecar-text">
+                          <span class="text-sidecar-success mt-1">✓</span>
+                          <span>{item}</span>
+                        </li>
+                      {/each}
+                    </ul>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
             <!-- Answer Display -->
             {#if answer}
               <div class="mt-4 p-4 glass rounded-xl border border-sidecar-border shadow-glow-accent">
@@ -503,7 +569,7 @@
                 <button
                   type="submit"
                   disabled={!question.trim() || isAsking || transcript.length === 0}
-                  class="px-5 py-3 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
+                  class="px-4 py-3 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
                 >
                   {#if isAsking}
                     <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -512,6 +578,24 @@
                     </svg>
                   {:else}
                     Ask
+                  {/if}
+                </button>
+                <button
+                  type="button"
+                  onclick={generateSummary}
+                  disabled={isGeneratingSummary || transcript.length === 0}
+                  class="px-4 py-3 bg-sidecar-purple hover:bg-sidecar-purple/80 rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
+                  title="Generate meeting summary"
+                >
+                  {#if isGeneratingSummary}
+                    <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                  {:else}
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
                   {/if}
                 </button>
               </form>

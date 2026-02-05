@@ -55,5 +55,11 @@ export interface TranscriptionEvent {
   is_partial: boolean;
 }
 
+export interface Summary {
+  overview: string;
+  action_items: string[];
+  key_points: string[];
+}
+
 export type View = 'home' | 'genie' | 'settings';
 export type Theme = 'light' | 'dark';
