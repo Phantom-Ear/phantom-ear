@@ -9,6 +9,7 @@ pub mod embeddings;
 pub mod llm;
 pub mod models;
 pub mod storage;
+pub mod transcription;
 
 use commands::AppState;
 use tauri::Manager;

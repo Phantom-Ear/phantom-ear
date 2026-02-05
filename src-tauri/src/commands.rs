@@ -3,6 +3,7 @@
 use crate::asr::{self, TranscriptionEngine, WhisperModel};
 use crate::audio::AudioCapture;
 use crate::models::{self, ModelInfo};
+use crate::transcription::{TranscriptionConfig, run_transcription_loop};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -94,15 +95,31 @@ impl Default for AppState {
 // Recording Commands
 // ============================================================================
 
+/// Format milliseconds to MM:SS string
+fn format_time(ms: u64) -> String {
+    let total_secs = ms / 1000;
+    let mins = total_secs / 60;
+    let secs = total_secs % 60;
+    format!("{:02}:{:02}", mins, secs)
+}
+
 /// Start audio recording and transcription
 #[tauri::command]
 pub async fn start_recording(
-    _app: AppHandle,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut is_recording = state.is_recording.lock().await;
     if *is_recording {
         return Err("Already recording".to_string());
+    }
+
+    // Check if model is loaded
+    {
+        let engine = state.transcription_engine.lock().await;
+        if engine.is_none() {
+            return Err("Transcription model not loaded. Please download a model first.".to_string());
+        }
     }
 
     // Initialize audio capture
@@ -117,14 +134,166 @@ pub async fn start_recording(
     *state.transcript.lock().await = Vec::new();
     *is_recording = true;
 
-    // Check if model is loaded
-    let engine = state.transcription_engine.lock().await;
-    if engine.is_none() {
-        log::warn!("Transcription engine not loaded - transcription will not work");
+    // Start transcription loop in background
+    let audio_capture_arc = state.audio_capture.clone();
+    let engine_arc = state.transcription_engine.clone();
+    let is_recording_arc = state.is_recording.clone();
+    let transcript_arc = state.transcript.clone();
+    let app_clone = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        run_transcription_loop_with_storage(
+            app_clone,
+            audio_capture_arc,
+            engine_arc,
+            is_recording_arc,
+            transcript_arc,
+            TranscriptionConfig::default(),
+        ).await;
+    });
+
+    log::info!("Recording started with transcription");
+    Ok(())
+}
+
+/// Transcription loop that also stores segments
+async fn run_transcription_loop_with_storage(
+    app: AppHandle,
+    audio_capture: Arc<Mutex<Option<AudioCapture>>>,
+    engine: Arc<Mutex<Option<TranscriptionEngine>>>,
+    is_recording: Arc<Mutex<bool>>,
+    transcript: Arc<Mutex<Vec<TranscriptSegment>>>,
+    config: TranscriptionConfig,
+) {
+    use crate::asr::resample_to_16khz;
+    use crate::transcription::TranscriptionEvent;
+    use tauri::Emitter;
+
+    let chunk_samples = (config.chunk_duration_secs * 16000.0) as usize;
+    let mut accumulated_samples: Vec<f32> = Vec::with_capacity(chunk_samples * 2);
+    let mut segment_counter: u64 = 0;
+    let mut total_duration_ms: i64 = 0;
+
+    log::info!("Transcription loop started, chunk size: {} samples", chunk_samples);
+
+    loop {
+        // Check if still recording
+        {
+            let recording = is_recording.lock().await;
+            if !*recording {
+                break;
+            }
+        }
+
+        // Get audio samples
+        let (samples, sample_rate) = {
+            let capture_guard = audio_capture.lock().await;
+            if let Some(ref capture) = *capture_guard {
+                (capture.get_samples(), capture.sample_rate())
+            } else {
+                (vec![], 16000)
+            }
+        };
+
+        if !samples.is_empty() {
+            // Resample if needed
+            let samples_16k = if sample_rate != 16000 {
+                match resample_to_16khz(&samples, sample_rate) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Resampling failed: {}", e);
+                        continue;
+                    }
+                }
+            } else {
+                samples
+            };
+
+            accumulated_samples.extend(samples_16k);
+        }
+
+        // Process if we have enough samples
+        if accumulated_samples.len() >= chunk_samples {
+            // Calculate RMS to check for silence
+            let rms: f32 = {
+                let sum_squares: f32 = accumulated_samples[..chunk_samples]
+                    .iter()
+                    .map(|s| s * s)
+                    .sum();
+                (sum_squares / chunk_samples as f32).sqrt()
+            };
+
+            if rms >= config.silence_threshold {
+                // Get the engine
+                let engine_guard = engine.lock().await;
+                if let Some(ref eng) = *engine_guard {
+                    // Process chunk
+                    let chunk: Vec<f32> = accumulated_samples.drain(..chunk_samples).collect();
+                    let duration_ms = (chunk.len() as f32 / 16.0) as i64;
+
+                    match eng.transcribe(&chunk).await {
+                        Ok(result) => {
+                            let text = result.full_text.trim();
+                            if !text.is_empty() {
+                                segment_counter += 1;
+
+                                let event = TranscriptionEvent {
+                                    id: format!("seg-{}", segment_counter),
+                                    text: text.to_string(),
+                                    start_ms: total_duration_ms,
+                                    end_ms: total_duration_ms + duration_ms,
+                                    is_partial: false,
+                                };
+
+                                // Store in transcript
+                                {
+                                    let mut transcript_guard = transcript.lock().await;
+                                    transcript_guard.push(TranscriptSegment {
+                                        id: event.id.clone(),
+                                        time: format_time(total_duration_ms as u64),
+                                        text: event.text.clone(),
+                                        timestamp_ms: total_duration_ms as u64,
+                                    });
+                                }
+
+                                total_duration_ms += duration_ms;
+
+                                // Emit to frontend
+                                if let Err(e) = app.emit("transcription", &event) {
+                                    log::error!("Failed to emit transcription: {}", e);
+                                }
+
+                                log::info!("[{}] {}", format_time(event.start_ms as u64), text);
+                            } else {
+                                total_duration_ms += duration_ms;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Transcription error: {}", e);
+                            total_duration_ms += (chunk_samples as f32 / 16.0) as i64;
+                        }
+                    }
+                } else {
+                    // No engine, discard samples
+                    accumulated_samples.drain(..chunk_samples);
+                    total_duration_ms += (chunk_samples as f32 / 16.0) as i64;
+                }
+            } else {
+                // Silence - discard but keep some overlap
+                let keep = (config.overlap_secs * 16000.0) as usize;
+                if accumulated_samples.len() > keep {
+                    let drain_count = accumulated_samples.len() - keep;
+                    accumulated_samples.drain(..drain_count);
+                }
+                total_duration_ms += (chunk_samples as f32 / 16.0) as i64;
+            }
+        }
+
+        // Small delay to prevent busy loop
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
-    log::info!("Recording started");
-    Ok(())
+    log::info!("Transcription loop ended, processed {} segments", segment_counter);
 }
 
 /// Stop recording and finalize transcript
@@ -137,13 +306,17 @@ pub async fn stop_recording(
         return Err("Not recording".to_string());
     }
 
+    // Signal to stop (this will stop the transcription loop)
+    *is_recording = false;
+
+    // Give the transcription loop a moment to finish
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
     // Stop audio capture
     let mut capture_guard = state.audio_capture.lock().await;
     if let Some(ref mut capture) = *capture_guard {
         capture.stop().map_err(|e| format!("Failed to stop: {}", e))?;
     }
-
-    *is_recording = false;
     *capture_guard = None;
 
     let transcript = state.transcript.lock().await.clone();

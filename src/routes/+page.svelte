@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
   import Setup from "$lib/components/Setup.svelte";
 
@@ -18,6 +18,14 @@
     timestamp_ms: number;
   }
 
+  interface TranscriptionEvent {
+    id: string;
+    text: string;
+    start_ms: number;
+    end_ms: number;
+    is_partial: boolean;
+  }
+
   // App state
   let needsSetup = $state(true);
   let isLoading = $state(true);
@@ -30,8 +38,10 @@
   let isAsking = $state(false);
   let answer = $state("");
 
-  // Timer
+  // Timer and event listener
   let timerInterval: ReturnType<typeof setInterval> | null = null;
+  let unlistenTranscription: UnlistenFn | null = null;
+  let transcriptContainer: HTMLDivElement | null = null;
 
   onMount(async () => {
     try {
@@ -48,7 +58,51 @@
     if (timerInterval) {
       clearInterval(timerInterval);
     }
+    if (unlistenTranscription) {
+      unlistenTranscription();
+    }
   });
+
+  // Format milliseconds to MM:SS
+  function formatTimeMs(ms: number): string {
+    const totalSecs = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }
+
+  // Subscribe to transcription events
+  async function startTranscriptionListener() {
+    unlistenTranscription = await listen<TranscriptionEvent>("transcription", (event) => {
+      const data = event.payload;
+
+      // Convert TranscriptionEvent to TranscriptSegment
+      const segment: TranscriptSegment = {
+        id: data.id,
+        time: formatTimeMs(data.start_ms),
+        text: data.text,
+        timestamp_ms: data.start_ms,
+      };
+
+      // Add to transcript
+      transcript = [...transcript, segment];
+
+      // Auto-scroll to bottom
+      requestAnimationFrame(() => {
+        if (transcriptContainer) {
+          transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+        }
+      });
+    });
+  }
+
+  // Stop transcription listener
+  function stopTranscriptionListener() {
+    if (unlistenTranscription) {
+      unlistenTranscription();
+      unlistenTranscription = null;
+    }
+  }
 
   function handleSetupComplete() {
     needsSetup = false;
@@ -60,42 +114,49 @@
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   }
 
-  function formatTime(ms: number): string {
-    const totalSecs = Math.floor(ms / 1000);
-    const mins = Math.floor(totalSecs / 60);
-    const secs = totalSecs % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  }
-
   async function toggleRecording() {
     if (isRecording) {
       // Stop recording
-      try {
-        const result = await invoke<TranscriptSegment[]>("stop_recording");
-        transcript = result;
-      } catch (e) {
-        console.error("Failed to stop recording:", e);
-      }
-
       isRecording = false;
+
+      // Stop the timer
       if (timerInterval) {
         clearInterval(timerInterval);
         timerInterval = null;
       }
+
+      // Stop transcription listener
+      stopTranscriptionListener();
+
+      try {
+        const result = await invoke<TranscriptSegment[]>("stop_recording");
+        // Update with final transcript from backend (includes any remaining segments)
+        if (result.length > 0) {
+          transcript = result;
+        }
+      } catch (e) {
+        console.error("Failed to stop recording:", e);
+      }
     } else {
       // Start recording
       try {
-        await invoke("start_recording");
-        isRecording = true;
-        recordingDuration = 0;
+        // Clear previous state
         transcript = [];
         answer = "";
+        recordingDuration = 0;
+
+        // Start listening for transcription events BEFORE starting recording
+        await startTranscriptionListener();
+
+        await invoke("start_recording");
+        isRecording = true;
 
         timerInterval = setInterval(() => {
           recordingDuration++;
         }, 1000);
       } catch (e) {
         console.error("Failed to start recording:", e);
+        stopTranscriptionListener();
       }
     }
   }
@@ -204,9 +265,9 @@
             </p>
           </div>
         {:else}
-          <div class="p-4 space-y-3 overflow-y-auto h-full">
-            {#each transcript as segment}
-              <div class="flex gap-3">
+          <div bind:this={transcriptContainer} class="p-4 space-y-3 overflow-y-auto h-full scroll-smooth">
+            {#each transcript as segment (segment.id)}
+              <div class="flex gap-3 animate-fade-in">
                 <span class="text-xs text-sidecar-text-muted font-mono shrink-0">{segment.time}</span>
                 <p class="text-sm leading-relaxed text-sidecar-text">{segment.text}</p>
               </div>
