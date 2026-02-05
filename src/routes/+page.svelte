@@ -47,6 +47,16 @@
     try {
       const status = await invoke<ModelStatus>("check_model_status");
       needsSetup = !status.whisper_downloaded;
+
+      // If model is downloaded, load it into memory
+      if (status.whisper_downloaded) {
+        try {
+          await invoke("load_model", { modelName: status.whisper_model });
+          console.log("Model loaded:", status.whisper_model);
+        } catch (e) {
+          console.error("Failed to load model:", e);
+        }
+      }
     } catch (e) {
       console.error("Failed to check model status:", e);
       needsSetup = true;
