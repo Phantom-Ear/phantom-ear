@@ -3,6 +3,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
   import Setup from "$lib/components/Setup.svelte";
+  import Settings from "$lib/components/Settings.svelte";
 
   interface ModelStatus {
     whisper_downloaded: boolean;
@@ -37,6 +38,9 @@
   let question = $state("");
   let isAsking = $state(false);
   let answer = $state("");
+
+  // Settings modal
+  let showSettings = $state(false);
 
   // Timer and event listener
   let timerInterval: ReturnType<typeof setInterval> | null = null;
@@ -187,8 +191,11 @@
   }
 
   function openSettings() {
-    // TODO: Open settings modal
-    console.log("Open settings");
+    showSettings = true;
+  }
+
+  function closeSettings() {
+    showSettings = false;
   }
 </script>
 
@@ -328,4 +335,9 @@
       </form>
     </div>
   </main>
+
+  <!-- Settings Modal -->
+  {#if showSettings}
+    <Settings onClose={closeSettings} />
+  {/if}
 {/if}

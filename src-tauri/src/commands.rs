@@ -449,14 +449,21 @@ pub async fn download_model(
         .await
         .map_err(|e| format!("Download failed: {}", e))?;
 
+    // Get language from settings
+    let language = {
+        let settings = state.settings.lock().await;
+        settings.language.clone()
+    };
+
     // Load the model into the transcription engine
     let mut engine = TranscriptionEngine::new();
+    engine.set_language(&language);
     engine.load_model(&model_path)
         .map_err(|e| format!("Failed to load model: {}", e))?;
 
     *state.transcription_engine.lock().await = Some(engine);
 
-    log::info!("Model {} loaded and ready", model_name);
+    log::info!("Model {} loaded and ready with language '{}'", model_name, language);
     Ok(())
 }
 
@@ -477,24 +484,22 @@ pub async fn load_model(
         return Err(format!("Model {} is not downloaded", model_name));
     }
 
-    // Check if already loaded
-    {
-        let engine = state.transcription_engine.lock().await;
-        if engine.is_some() {
-            log::info!("Model already loaded");
-            return Ok(());
-        }
-    }
+    // Get language from settings
+    let language = {
+        let settings = state.settings.lock().await;
+        settings.language.clone()
+    };
 
-    // Load the model
-    log::info!("Loading model {} from {:?}", model_name, model_path);
+    // Load the model (always reload to apply new language settings)
+    log::info!("Loading model {} with language '{}' from {:?}", model_name, language, model_path);
     let mut engine = TranscriptionEngine::new();
+    engine.set_language(&language);
     engine.load_model(&model_path)
         .map_err(|e| format!("Failed to load model: {}", e))?;
 
     *state.transcription_engine.lock().await = Some(engine);
 
-    log::info!("Model {} loaded and ready", model_name);
+    log::info!("Model {} loaded and ready with language '{}'", model_name, language);
     Ok(())
 }
 
