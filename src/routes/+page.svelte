@@ -42,15 +42,52 @@
   // Settings modal
   let showSettings = $state(false);
 
+  // Language indicator
+  let currentLanguage = $state("en");
+  const languageNames: Record<string, string> = {
+    auto: "Auto-detect",
+    en: "English",
+    fr: "French",
+    es: "Spanish",
+    de: "German",
+    it: "Italian",
+    pt: "Portuguese",
+    nl: "Dutch",
+    pl: "Polish",
+    ru: "Russian",
+    ja: "Japanese",
+    ko: "Korean",
+    zh: "Chinese",
+    ar: "Arabic",
+  };
+
   // Timer and event listener
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let unlistenTranscription: UnlistenFn | null = null;
   let transcriptContainer: HTMLDivElement | null = null;
 
+  interface Settings {
+    llm_provider: string;
+    openai_api_key: string | null;
+    ollama_url: string | null;
+    ollama_model: string | null;
+    auto_detect_meetings: boolean;
+    whisper_model: string;
+    language: string;
+  }
+
   onMount(async () => {
     try {
       const status = await invoke<ModelStatus>("check_model_status");
       needsSetup = !status.whisper_downloaded;
+
+      // Load current settings to get language
+      try {
+        const settings = await invoke<Settings>("get_settings");
+        currentLanguage = settings.language;
+      } catch (e) {
+        console.error("Failed to load settings:", e);
+      }
 
       // If model is downloaded, load it into memory
       if (status.whisper_downloaded) {
@@ -194,8 +231,15 @@
     showSettings = true;
   }
 
-  function closeSettings() {
+  async function closeSettings() {
     showSettings = false;
+    // Refresh language after settings might have changed
+    try {
+      const settings = await invoke<Settings>("get_settings");
+      currentLanguage = settings.language;
+    } catch (e) {
+      console.error("Failed to refresh settings:", e);
+    }
   }
 </script>
 
@@ -218,41 +262,66 @@
         <h1 class="text-xl font-semibold text-sidecar-text">Sidecar</h1>
       </div>
 
-      <button
-        onclick={openSettings}
-        class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
-        title="Settings"
-      >
-        <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </button>
+      <div class="flex items-center gap-2">
+        <!-- Language Indicator -->
+        <button
+          onclick={openSettings}
+          class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-sidecar-surface border border-sidecar-border hover:border-sidecar-text-muted transition-colors"
+          title="Change language"
+        >
+          <svg class="w-4 h-4 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+          </svg>
+          <span class="text-xs font-medium text-sidecar-text">{languageNames[currentLanguage] || currentLanguage}</span>
+          <svg class="w-3 h-3 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        <!-- Settings Button -->
+        <button
+          onclick={openSettings}
+          class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
+          title="Settings"
+        >
+          <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+      </div>
     </header>
 
     <!-- Recording Control -->
     <div class="flex flex-col items-center justify-center py-8">
-      <button
-        onclick={toggleRecording}
-        class="relative w-24 h-24 rounded-full transition-all duration-300 {isRecording
-          ? 'bg-sidecar-danger hover:bg-red-600'
-          : 'bg-sidecar-surface hover:bg-sidecar-surface-hover border-2 border-sidecar-border'}"
-      >
+      <div class="relative">
+        <!-- Outer ring pulse when recording -->
         {#if isRecording}
-          <div class="absolute inset-0 rounded-full bg-sidecar-danger animate-pulse-recording opacity-50"></div>
-          <svg class="w-8 h-8 mx-auto text-white relative z-10" fill="currentColor" viewBox="0 0 24 24">
-            <rect x="6" y="6" width="12" height="12" rx="2" />
-          </svg>
-        {:else}
-          <svg class="w-8 h-8 mx-auto text-sidecar-text-muted" fill="currentColor" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="6" />
-          </svg>
+          <div class="absolute inset-0 rounded-full bg-sidecar-danger/30 animate-ring-pulse"></div>
+          <div class="absolute inset-0 rounded-full bg-sidecar-danger/20 animate-ring-pulse" style="animation-delay: 0.5s"></div>
         {/if}
-      </button>
+
+        <button
+          onclick={toggleRecording}
+          class="relative w-24 h-24 rounded-full transition-all duration-300 btn-shine {isRecording
+            ? 'bg-gradient-danger animate-recording-glow'
+            : 'bg-gradient-accent animate-idle-glow hover:scale-105'}"
+        >
+          {#if isRecording}
+            <svg class="w-8 h-8 mx-auto text-white relative z-10" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          {:else}
+            <svg class="w-8 h-8 mx-auto text-white" fill="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="6" />
+            </svg>
+          {/if}
+        </button>
+      </div>
 
       <p class="mt-4 text-sm text-sidecar-text-muted">
         {#if isRecording}
-          Recording <span class="font-mono text-sidecar-danger">{formatDuration(recordingDuration)}</span>
+          Recording <span class="font-mono text-sidecar-danger font-semibold">{formatDuration(recordingDuration)}</span>
         {:else}
           Click to start recording
         {/if}
@@ -268,13 +337,15 @@
         {/if}
       </div>
 
-      <div class="flex-1 bg-sidecar-surface rounded-xl border border-sidecar-border overflow-hidden">
+      <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-hidden shadow-glow-surface">
         {#if transcript.length === 0}
           <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
-            <svg class="w-12 h-12 mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <p class="text-sm">
+            <div class="w-16 h-16 mb-4 rounded-2xl bg-sidecar-surface/50 flex items-center justify-center">
+              <svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <p class="text-sm font-medium">
               {isRecording ? "Listening..." : "No transcript yet"}
             </p>
             <p class="text-xs mt-1 opacity-70">
@@ -284,8 +355,8 @@
         {:else}
           <div bind:this={transcriptContainer} class="p-4 space-y-3 overflow-y-auto h-full scroll-smooth">
             {#each transcript as segment (segment.id)}
-              <div class="flex gap-3 animate-fade-in">
-                <span class="text-xs text-sidecar-text-muted font-mono shrink-0">{segment.time}</span>
+              <div class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-sidecar-surface/50 transition-colors">
+                <span class="text-xs text-sidecar-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
                 <p class="text-sm leading-relaxed text-sidecar-text">{segment.text}</p>
               </div>
             {/each}
@@ -296,9 +367,16 @@
 
     <!-- Answer Display -->
     {#if answer}
-      <div class="mt-4 p-4 bg-sidecar-surface rounded-xl border border-sidecar-border">
-        <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide mb-2">Answer</h3>
-        <p class="text-sm text-sidecar-text whitespace-pre-wrap">{answer}</p>
+      <div class="mt-4 p-4 glass rounded-xl border border-sidecar-border shadow-glow-accent">
+        <div class="flex items-center gap-2 mb-2">
+          <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
+            <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">AI Answer</h3>
+        </div>
+        <p class="text-sm text-sidecar-text whitespace-pre-wrap leading-relaxed">{answer}</p>
       </div>
     {/if}
 
@@ -316,12 +394,12 @@
           bind:value={question}
           placeholder="Ask a question about the meeting..."
           disabled={transcript.length === 0}
-          class="flex-1 px-4 py-3 bg-sidecar-surface border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="flex-1 px-4 py-3 glass border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent focus:shadow-glow-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <button
           type="submit"
           disabled={!question.trim() || isAsking || transcript.length === 0}
-          class="px-4 py-3 bg-sidecar-accent hover:bg-sidecar-accent-hover rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="px-5 py-3 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
         >
           {#if isAsking}
             <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">

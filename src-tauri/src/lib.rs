@@ -8,6 +8,7 @@ pub mod detection;
 pub mod embeddings;
 pub mod llm;
 pub mod models;
+pub mod specs;
 pub mod storage;
 pub mod transcription;
 
@@ -35,6 +36,9 @@ pub fn run() {
             commands::load_model,
             commands::get_models_info,
             commands::list_audio_devices,
+            commands::get_device_specs,
+            commands::get_model_recommendation,
+            commands::get_asr_backends,
         ])
         .setup(|app| {
             // Initialize storage on app start

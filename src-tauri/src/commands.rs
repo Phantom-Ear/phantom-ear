@@ -2,6 +2,7 @@
 
 use crate::asr::{self, TranscriptionEngine, WhisperModel};
 use crate::audio::AudioCapture;
+use crate::llm::{LlmClient, LlmProvider};
 use crate::models::{self, ModelInfo};
 use crate::transcription::{TranscriptionConfig, run_transcription_loop};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,12 @@ pub struct Settings {
     pub auto_detect_meetings: bool,
     pub whisper_model: String,
     pub language: String,
+    #[serde(default = "default_asr_backend")]
+    pub asr_backend: String,
+}
+
+fn default_asr_backend() -> String {
+    "whisper".to_string()
 }
 
 impl Default for Settings {
@@ -42,6 +49,7 @@ impl Default for Settings {
             auto_detect_meetings: false,
             whisper_model: "base".to_string(),
             language: "en".to_string(),
+            asr_backend: "whisper".to_string(),
         }
     }
 }
@@ -351,15 +359,39 @@ pub async fn ask_question(
     }
 
     // Build context from transcript
-    let _context: String = transcript
+    let context: String = transcript
         .iter()
         .map(|s| format!("[{}] {}", s.time, s.text))
         .collect::<Vec<_>>()
         .join("\n");
 
-    // TODO: Use LLM to answer question
-    log::info!("Question received: {}", question);
-    Ok(format!("Question: {}\n\nThis feature requires LLM configuration. Please set up OpenAI or Ollama in settings.", question))
+    // Get settings and create LLM client
+    let settings = state.settings.lock().await;
+    let provider = match settings.llm_provider.as_str() {
+        "openai" => {
+            let api_key = settings.openai_api_key.clone()
+                .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
+            if api_key.is_empty() {
+                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+            }
+            LlmProvider::OpenAI { api_key }
+        }
+        "ollama" | _ => {
+            let url = settings.ollama_url.clone()
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model = settings.ollama_model.clone()
+                .unwrap_or_else(|| "llama3.2".to_string());
+            LlmProvider::Ollama { url, model }
+        }
+    };
+    drop(settings); // Release lock before async call
+
+    let client = LlmClient::new(provider);
+    log::info!("Asking question: {}", question);
+
+    client.answer_question(&context, &question)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))
 }
 
 /// Generate meeting summary using LLM
@@ -373,11 +405,85 @@ pub async fn generate_summary(
         return Err("No transcript available".to_string());
     }
 
-    // TODO: Use LLM to generate summary
+    // Build transcript text
+    let transcript_text: String = transcript
+        .iter()
+        .map(|s| format!("[{}] {}", s.time, s.text))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Get settings and create LLM client
+    let settings = state.settings.lock().await;
+    let provider = match settings.llm_provider.as_str() {
+        "openai" => {
+            let api_key = settings.openai_api_key.clone()
+                .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
+            if api_key.is_empty() {
+                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+            }
+            LlmProvider::OpenAI { api_key }
+        }
+        "ollama" | _ => {
+            let url = settings.ollama_url.clone()
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model = settings.ollama_model.clone()
+                .unwrap_or_else(|| "llama3.2".to_string());
+            LlmProvider::Ollama { url, model }
+        }
+    };
+    drop(settings); // Release lock before async call
+
+    let client = LlmClient::new(provider);
+    log::info!("Generating meeting summary");
+
+    let summary_text = client.summarize(&transcript_text)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))?;
+
+    // Parse the summary into structured format
+    // The LLM returns free-form text, so we'll put it in overview and extract what we can
+    let lines: Vec<&str> = summary_text.lines().collect();
+    let mut overview = String::new();
+    let mut action_items = Vec::new();
+    let mut key_points = Vec::new();
+    let mut current_section = "overview";
+
+    for line in lines {
+        let line_lower = line.to_lowercase();
+        if line_lower.contains("action item") || line_lower.contains("todo") || line_lower.contains("next step") {
+            current_section = "actions";
+            continue;
+        } else if line_lower.contains("key point") || line_lower.contains("highlight") || line_lower.contains("important") {
+            current_section = "points";
+            continue;
+        }
+
+        let trimmed = line.trim().trim_start_matches(&['-', '*', '•', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')'][..]).trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        match current_section {
+            "actions" => action_items.push(trimmed.to_string()),
+            "points" => key_points.push(trimmed.to_string()),
+            _ => {
+                if !overview.is_empty() {
+                    overview.push(' ');
+                }
+                overview.push_str(trimmed);
+            }
+        }
+    }
+
+    // If no structured parsing worked, put everything in overview
+    if overview.is_empty() && action_items.is_empty() && key_points.is_empty() {
+        overview = summary_text;
+    }
+
     Ok(Summary {
-        overview: "Summary generation requires LLM configuration.".to_string(),
-        action_items: vec![],
-        key_points: transcript.iter().map(|s| s.text.clone()).take(5).collect(),
+        overview,
+        action_items,
+        key_points,
     })
 }
 
@@ -520,4 +626,34 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
         name: d.name,
         is_default: d.is_default,
     }).collect())
+}
+
+// ============================================================================
+// Device Specs Commands
+// ============================================================================
+
+use crate::specs::{DeviceSpecs, ModelRecommendation};
+use crate::asr::{BackendInfo, get_available_backends};
+
+/// Get device specifications (CPU, RAM, GPU)
+#[tauri::command]
+pub async fn get_device_specs() -> Result<DeviceSpecs, String> {
+    Ok(DeviceSpecs::detect())
+}
+
+/// Get model recommendation based on device specs
+#[tauri::command]
+pub async fn get_model_recommendation() -> Result<ModelRecommendation, String> {
+    let specs = DeviceSpecs::detect();
+    Ok(ModelRecommendation::from_specs(&specs))
+}
+
+// ============================================================================
+// ASR Backend Commands
+// ============================================================================
+
+/// Get available ASR backends
+#[tauri::command]
+pub async fn get_asr_backends() -> Result<Vec<BackendInfo>, String> {
+    Ok(get_available_backends())
 }

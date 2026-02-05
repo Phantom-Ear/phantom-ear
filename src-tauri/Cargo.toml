@@ -52,6 +52,13 @@ crossbeam-channel = "0.5"
 # File/path utilities
 directories = "6"
 
+# System info
+num_cpus = "1.16"
+sysinfo = "0.32"
+
+# Async trait support
+async-trait = "0.1"
+
 # Progress tracking
 indicatif = "0.17"
 
