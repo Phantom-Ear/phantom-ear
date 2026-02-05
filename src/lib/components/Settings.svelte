@@ -9,6 +9,7 @@
     auto_detect_meetings: boolean;
     whisper_model: string;
     language: string;
+    asr_backend: string;
   }
 
   interface ModelInfo {
@@ -16,6 +17,13 @@
     size_mb: number;
     downloaded: boolean;
     description: string;
+  }
+
+  interface BackendInfo {
+    backend_type: string;
+    name: string;
+    description: string;
+    supported_languages: string[];
   }
 
   let { onClose }: { onClose: () => void } = $props();
@@ -28,7 +36,10 @@
     auto_detect_meetings: false,
     whisper_model: "base",
     language: "en",
+    asr_backend: "whisper",
   });
+
+  let asrBackends = $state<BackendInfo[]>([]);
 
   let models = $state<ModelInfo[]>([]);
   let isLoading = $state(true);
@@ -54,12 +65,14 @@
 
   async function loadSettings() {
     try {
-      const [loadedSettings, loadedModels] = await Promise.all([
+      const [loadedSettings, loadedModels, loadedBackends] = await Promise.all([
         invoke<Settings>("get_settings"),
         invoke<ModelInfo[]>("get_models_info"),
+        invoke<BackendInfo[]>("get_asr_backends"),
       ]);
       settings = loadedSettings;
       models = loadedModels;
+      asrBackends = loadedBackends;
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
@@ -89,7 +102,7 @@
 
 <!-- Backdrop -->
 <div
-  class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+  class="fixed inset-0 bg-black/70 backdrop-blur-md z-40"
   onclick={onClose}
   onkeydown={(e) => e.key === "Escape" && onClose()}
   role="button"
@@ -97,10 +110,18 @@
 ></div>
 
 <!-- Modal -->
-<div class="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] bg-sidecar-surface rounded-2xl border border-sidecar-border shadow-2xl z-50 flex flex-col overflow-hidden">
+<div class="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-sidecar-border shadow-glow-surface z-50 flex flex-col overflow-hidden">
   <!-- Header -->
-  <div class="flex items-center justify-between px-6 py-4 border-b border-sidecar-border">
-    <h2 class="text-lg font-semibold text-sidecar-text">Settings</h2>
+  <div class="flex items-center justify-between px-6 py-4 border-b border-sidecar-border/50">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-accent flex items-center justify-center">
+        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      </div>
+      <h2 class="text-lg font-semibold text-sidecar-text">Settings</h2>
+    </div>
     <button
       onclick={onClose}
       class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
@@ -117,18 +138,34 @@
     </div>
   {:else}
     <!-- Tabs -->
-    <div class="flex border-b border-sidecar-border">
+    <div class="flex border-b border-sidecar-border/50 px-2">
       <button
         onclick={() => activeTab = "general"}
-        class="flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-sidecar-accent border-b-2 border-sidecar-accent' : 'text-sidecar-text-muted hover:text-sidecar-text'}"
+        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-sidecar-accent' : 'text-sidecar-text-muted hover:text-sidecar-text'}"
       >
-        General
+        <span class="relative z-10 flex items-center justify-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          General
+        </span>
+        {#if activeTab === 'general'}
+          <div class="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-accent rounded-full"></div>
+        {/if}
       </button>
       <button
         onclick={() => activeTab = "llm"}
-        class="flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'llm' ? 'text-sidecar-accent border-b-2 border-sidecar-accent' : 'text-sidecar-text-muted hover:text-sidecar-text'}"
+        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'llm' ? 'text-sidecar-accent' : 'text-sidecar-text-muted hover:text-sidecar-text'}"
       >
-        LLM
+        <span class="relative z-10 flex items-center justify-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+          LLM
+        </span>
+        {#if activeTab === 'llm'}
+          <div class="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-accent rounded-full"></div>
+        {/if}
       </button>
     </div>
 
@@ -153,35 +190,36 @@
           </p>
         </div>
 
-        <!-- Whisper Model -->
+        <!-- ASR Backend -->
         <div>
           <label class="block text-sm font-medium text-sidecar-text mb-2">
-            Whisper Model
+            Speech Recognition Engine
           </label>
           <div class="space-y-2">
-            {#each models as model}
+            {#each asrBackends as backend}
+              {@const isParakeet = backend.backend_type === "parakeet"}
               <label
-                class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.whisper_model === model.name ? 'border-sidecar-accent bg-sidecar-accent/10' : 'border-sidecar-border hover:border-sidecar-text-muted'}"
+                class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.asr_backend === backend.backend_type ? 'border-sidecar-accent bg-sidecar-accent/10' : 'border-sidecar-border hover:border-sidecar-text-muted'} {isParakeet ? 'opacity-60' : ''}"
               >
                 <input
                   type="radio"
-                  name="whisper_model"
-                  value={model.name}
-                  bind:group={settings.whisper_model}
+                  name="asr_backend"
+                  value={backend.backend_type}
+                  bind:group={settings.asr_backend}
+                  disabled={isParakeet}
                   class="sr-only"
                 />
                 <div class="flex-1">
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-sidecar-text capitalize">{model.name}</span>
-                    <span class="text-xs text-sidecar-text-muted">{model.size_mb} MB</span>
-                    {#if model.downloaded}
-                      <span class="text-xs text-sidecar-success">Downloaded</span>
+                    <span class="text-sm font-medium text-sidecar-text">{backend.name}</span>
+                    {#if isParakeet}
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-sidecar-warning/20 text-sidecar-warning">Coming Soon</span>
                     {/if}
                   </div>
-                  <p class="text-xs text-sidecar-text-muted mt-0.5">{model.description}</p>
+                  <p class="text-xs text-sidecar-text-muted mt-0.5">{backend.description}</p>
                 </div>
-                <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.whisper_model === model.name ? 'border-sidecar-accent' : 'border-sidecar-border'}">
-                  {#if settings.whisper_model === model.name}
+                <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.asr_backend === backend.backend_type ? 'border-sidecar-accent' : 'border-sidecar-border'}">
+                  {#if settings.asr_backend === backend.backend_type}
                     <div class="w-2 h-2 rounded-full bg-sidecar-accent"></div>
                   {/if}
                 </div>
@@ -189,6 +227,45 @@
             {/each}
           </div>
         </div>
+
+        <!-- Whisper Model (only show when Whisper is selected) -->
+        {#if settings.asr_backend === "whisper"}
+          <div>
+            <label class="block text-sm font-medium text-sidecar-text mb-2">
+              Whisper Model
+            </label>
+            <div class="space-y-2">
+              {#each models as model}
+                <label
+                  class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.whisper_model === model.name ? 'border-sidecar-accent bg-sidecar-accent/10' : 'border-sidecar-border hover:border-sidecar-text-muted'}"
+                >
+                  <input
+                    type="radio"
+                    name="whisper_model"
+                    value={model.name}
+                    bind:group={settings.whisper_model}
+                    class="sr-only"
+                  />
+                  <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium text-sidecar-text capitalize">{model.name}</span>
+                      <span class="text-xs text-sidecar-text-muted">{model.size_mb} MB</span>
+                      {#if model.downloaded}
+                        <span class="text-xs text-sidecar-success">Downloaded</span>
+                      {/if}
+                    </div>
+                    <p class="text-xs text-sidecar-text-muted mt-0.5">{model.description}</p>
+                  </div>
+                  <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.whisper_model === model.name ? 'border-sidecar-accent' : 'border-sidecar-border'}">
+                    {#if settings.whisper_model === model.name}
+                      <div class="w-2 h-2 rounded-full bg-sidecar-accent"></div>
+                    {/if}
+                  </div>
+                </label>
+              {/each}
+            </div>
+          </div>
+        {/if}
 
       {:else if activeTab === "llm"}
         <!-- LLM Provider -->
@@ -262,19 +339,29 @@
     </div>
 
     <!-- Footer -->
-    <div class="flex justify-end gap-3 px-6 py-4 border-t border-sidecar-border">
+    <div class="flex justify-end gap-3 px-6 py-4 border-t border-sidecar-border/50">
       <button
         onclick={onClose}
-        class="px-4 py-2 rounded-xl text-sm font-medium text-sidecar-text-muted hover:text-sidecar-text transition-colors"
+        class="px-4 py-2.5 rounded-xl text-sm font-medium text-sidecar-text-muted hover:text-sidecar-text hover:bg-sidecar-surface transition-colors"
       >
         Cancel
       </button>
       <button
         onclick={saveSettings}
         disabled={isSaving}
-        class="px-4 py-2 bg-sidecar-accent hover:bg-sidecar-accent-hover rounded-xl text-sm font-medium text-white transition-colors disabled:opacity-50"
+        class="px-5 py-2.5 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:hover:transform-none btn-shine"
       >
-        {isSaving ? "Saving..." : "Save Changes"}
+        {#if isSaving}
+          <span class="flex items-center gap-2">
+            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            Saving...
+          </span>
+        {:else}
+          Save Changes
+        {/if}
       </button>
     </div>
   {/if}

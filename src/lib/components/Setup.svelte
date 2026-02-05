@@ -8,6 +8,7 @@
     size_mb: number;
     downloaded: boolean;
     recommended: boolean;
+    description: string;
   }
 
   interface DownloadProgress {
@@ -18,6 +19,25 @@
     status: "Starting" | "Downloading" | "Completed" | "Failed" | "Cancelled";
   }
 
+  interface DeviceSpecs {
+    cpu_cores: number;
+    cpu_threads: number;
+    cpu_name: string;
+    ram_gb: number;
+    available_ram_gb: number;
+    has_gpu: boolean;
+    gpu_name: string | null;
+    is_apple_silicon: boolean;
+    os: string;
+  }
+
+  interface ModelRecommendation {
+    recommended_model: string;
+    reason: string;
+    estimated_speed: number;
+    model_compatibility: { name: string; compatible: boolean; reason: string }[];
+  }
+
   let { onComplete }: { onComplete: () => void } = $props();
 
   let models = $state<ModelInfo[]>([]);
@@ -26,10 +46,26 @@
   let downloadProgress = $state<DownloadProgress | null>(null);
   let error = $state("");
   let unlisten: (() => void) | null = null;
+  let deviceSpecs = $state<DeviceSpecs | null>(null);
+  let recommendation = $state<ModelRecommendation | null>(null);
 
   onMount(async () => {
     try {
-      models = await invoke<ModelInfo[]>("get_models_info");
+      // Load models and device specs in parallel
+      const [loadedModels, specs, rec] = await Promise.all([
+        invoke<ModelInfo[]>("get_models_info"),
+        invoke<DeviceSpecs>("get_device_specs"),
+        invoke<ModelRecommendation>("get_model_recommendation"),
+      ]);
+
+      models = loadedModels;
+      deviceSpecs = specs;
+      recommendation = rec;
+
+      // Auto-select recommended model
+      if (rec.recommended_model) {
+        selectedModel = rec.recommended_model;
+      }
 
       // Listen for download progress events
       unlisten = await listen<DownloadProgress>("model-download-progress", (event) => {
@@ -81,10 +117,13 @@
   <div class="w-full max-w-md">
     <!-- Logo and Title -->
     <div class="text-center mb-8">
-      <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-sidecar-accent flex items-center justify-center">
-        <svg class="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-        </svg>
+      <div class="relative w-20 h-20 mx-auto mb-5">
+        <div class="absolute inset-0 rounded-2xl bg-gradient-accent blur-xl opacity-50"></div>
+        <div class="relative w-full h-full rounded-2xl bg-gradient-accent flex items-center justify-center shadow-glow-accent">
+          <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+        </div>
       </div>
       <h1 class="text-2xl font-semibold mb-2">Welcome to Sidecar</h1>
       <p class="text-sidecar-text-muted text-sm">
@@ -92,8 +131,43 @@
       </p>
     </div>
 
+    <!-- Device Specs Card (if detected) -->
+    {#if deviceSpecs && !isDownloading}
+      <div class="glass rounded-xl border border-sidecar-border p-4 mb-4 shadow-glow-surface">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-4 h-4 text-sidecar-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+          </svg>
+          <span class="text-sm font-medium text-sidecar-text">Your System</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="text-sidecar-text-muted">CPU:</span>
+            <span class="text-sidecar-text truncate">{deviceSpecs.cpu_cores} cores</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sidecar-text-muted">RAM:</span>
+            <span class="text-sidecar-text">{deviceSpecs.ram_gb.toFixed(0)} GB</span>
+          </div>
+          {#if deviceSpecs.has_gpu}
+            <div class="flex items-center gap-2 col-span-2">
+              <span class="text-sidecar-text-muted">GPU:</span>
+              <span class="text-sidecar-success">{deviceSpecs.gpu_name || "Available"}</span>
+            </div>
+          {/if}
+        </div>
+        {#if recommendation}
+          <div class="mt-3 pt-3 border-t border-sidecar-border/50">
+            <p class="text-xs text-sidecar-text-muted">
+              <span class="text-sidecar-accent font-medium">{recommendation.recommended_model}</span> model recommended - {recommendation.reason}
+            </p>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Setup Card -->
-    <div class="bg-sidecar-surface rounded-2xl border border-sidecar-border p-6">
+    <div class="glass rounded-2xl border border-sidecar-border p-6 shadow-glow-surface">
       {#if !isDownloading}
         <h2 class="text-lg font-medium mb-4">Download Speech Model</h2>
         <p class="text-sm text-sidecar-text-muted mb-6">
@@ -103,11 +177,15 @@
         <!-- Model Selection -->
         <div class="space-y-3 mb-6">
           {#each models as model}
+            {@const compat = recommendation?.model_compatibility.find(c => c.name === model.name)}
+            {@const isRecommended = recommendation?.recommended_model === model.name}
             <label
               class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors
                 {selectedModel === model.name
                   ? 'border-sidecar-accent bg-sidecar-accent/10'
-                  : 'border-sidecar-border hover:border-sidecar-text-muted'}"
+                  : compat && !compat.compatible
+                    ? 'border-sidecar-border/50 opacity-60'
+                    : 'border-sidecar-border hover:border-sidecar-text-muted'}"
             >
               <input
                 type="radio"
@@ -117,10 +195,10 @@
                 class="sr-only"
               />
               <div class="flex-1">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="font-medium capitalize">{model.name}</span>
-                  {#if model.recommended}
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-sidecar-accent/20 text-sidecar-accent">
+                  {#if isRecommended}
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-gradient-accent text-white">
                       Recommended
                     </span>
                   {/if}
@@ -129,10 +207,20 @@
                       Downloaded
                     </span>
                   {/if}
+                  {#if compat && !compat.compatible}
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-sidecar-warning/20 text-sidecar-warning">
+                      May be slow
+                    </span>
+                  {/if}
                 </div>
-                <span class="text-xs text-sidecar-text-muted">{model.size_mb} MB</span>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="text-xs text-sidecar-text-muted">{model.size_mb} MB</span>
+                  {#if model.description}
+                    <span class="text-xs text-sidecar-text-muted">• {model.description}</span>
+                  {/if}
+                </div>
               </div>
-              <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center
+              <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0
                 {selectedModel === model.name ? 'border-sidecar-accent' : 'border-sidecar-border'}">
                 {#if selectedModel === model.name}
                   <div class="w-2.5 h-2.5 rounded-full bg-sidecar-accent"></div>
@@ -150,7 +238,7 @@
 
         <button
           onclick={startDownload}
-          class="w-full py-3 px-4 bg-sidecar-accent hover:bg-sidecar-accent-hover rounded-xl font-medium transition-colors"
+          class="w-full py-3.5 px-4 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl font-medium transition-all hover-lift btn-shine"
         >
           Download & Continue
         </button>
@@ -162,11 +250,22 @@
       {:else}
         <!-- Download Progress -->
         <div class="text-center">
-          <div class="w-12 h-12 mx-auto mb-4 rounded-xl bg-sidecar-accent/20 flex items-center justify-center">
-            <svg class="w-6 h-6 text-sidecar-accent animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
+          <div class="relative w-14 h-14 mx-auto mb-4">
+            {#if downloadProgress?.status === "Completed"}
+              <div class="w-full h-full rounded-xl bg-sidecar-success/20 flex items-center justify-center">
+                <svg class="w-7 h-7 text-sidecar-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            {:else}
+              <div class="absolute inset-0 rounded-xl bg-gradient-accent opacity-20 animate-pulse"></div>
+              <div class="relative w-full h-full rounded-xl bg-sidecar-surface flex items-center justify-center">
+                <svg class="w-6 h-6 text-sidecar-accent animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+              </div>
+            {/if}
           </div>
 
           <h2 class="text-lg font-medium mb-2">
@@ -183,14 +282,14 @@
             </p>
 
             <!-- Progress Bar -->
-            <div class="w-full h-2 bg-sidecar-border rounded-full overflow-hidden mb-2">
+            <div class="w-full h-2.5 bg-sidecar-border rounded-full overflow-hidden mb-2">
               <div
-                class="h-full bg-sidecar-accent transition-all duration-300 ease-out"
+                class="h-full bg-gradient-accent transition-all duration-300 ease-out rounded-full"
                 style="width: {downloadProgress.percentage}%"
               ></div>
             </div>
 
-            <p class="text-sm text-sidecar-text-muted">
+            <p class="text-sm text-sidecar-text-muted font-mono">
               {downloadProgress.percentage.toFixed(1)}%
             </p>
           {:else}
@@ -203,11 +302,13 @@
     </div>
 
     <!-- Privacy Note -->
-    <p class="text-xs text-sidecar-text-muted text-center mt-6">
-      <svg class="w-4 h-4 inline-block mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="flex items-center justify-center gap-2 mt-6 px-4 py-2 rounded-full bg-sidecar-surface/50 border border-sidecar-border/50 mx-auto w-fit">
+      <svg class="w-4 h-4 text-sidecar-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
       </svg>
-      Your audio and transcripts stay on your device
-    </p>
+      <p class="text-xs text-sidecar-text-muted">
+        Your audio and transcripts stay on your device
+      </p>
+    </div>
   </div>
 </div>
