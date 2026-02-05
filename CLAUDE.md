@@ -23,16 +23,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Live transcript display with auto-scroll
 - Model loading on app restart fix
 
-### Phase 4: Settings & Language Support 🔄 (Current)
+### Phase 4: Settings & Language Support ✅
 - Settings UI panel (language, model selection, LLM config)
 - Apply language setting to transcription engine
 - LLM provider configuration (Ollama/OpenAI)
 
-### Phase 5: LLM Integration (Upcoming)
+### Phase 5: LLM Integration ✅
 - Ollama client for local LLM inference
 - OpenAI API client
 - RAG-based Q&A using transcript context
-- Meeting summary generation
+- Meeting summary generation with structured output
 
 ### Phase 6: Meeting Persistence (Upcoming)
 - Save transcripts to SQLite database

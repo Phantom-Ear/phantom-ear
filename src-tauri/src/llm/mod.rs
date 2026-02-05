@@ -1,7 +1,7 @@
 // LLM module
 // Interface with OpenAI and Ollama for AI features
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -21,25 +21,46 @@ struct ChatMessage {
     content: String,
 }
 
+// OpenAI request format
 #[derive(Debug, Serialize)]
-struct ChatRequest {
+struct OpenAIRequest {
     model: String,
     messages: Vec<ChatMessage>,
     temperature: f32,
 }
 
+// OpenAI response format
 #[derive(Debug, Deserialize)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
+struct OpenAIResponse {
+    choices: Vec<OpenAIChoice>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatChoice {
-    message: ChatMessageResponse,
+struct OpenAIChoice {
+    message: OpenAIMessage,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatMessageResponse {
+struct OpenAIMessage {
+    content: String,
+}
+
+// Ollama request format
+#[derive(Debug, Serialize)]
+struct OllamaRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    stream: bool,
+}
+
+// Ollama response format
+#[derive(Debug, Deserialize)]
+struct OllamaResponse {
+    message: OllamaMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaMessage {
     content: String,
 }
 
@@ -53,21 +74,19 @@ impl LlmClient {
 
     /// Send a completion request
     pub async fn complete(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
-        let (url, model, headers) = match &self.provider {
-            LlmProvider::OpenAI { api_key } => (
-                "https://api.openai.com/v1/chat/completions".to_string(),
-                "gpt-4o-mini".to_string(),
-                vec![("Authorization", format!("Bearer {}", api_key))],
-            ),
-            LlmProvider::Ollama { url, model } => (
-                format!("{}/api/chat", url),
-                model.clone(),
-                vec![],
-            ),
-        };
+        match &self.provider {
+            LlmProvider::OpenAI { api_key } => {
+                self.complete_openai(api_key, system_prompt, user_prompt).await
+            }
+            LlmProvider::Ollama { url, model } => {
+                self.complete_ollama(url, model, system_prompt, user_prompt).await
+            }
+        }
+    }
 
-        let request = ChatRequest {
-            model,
+    async fn complete_openai(&self, api_key: &str, system_prompt: &str, user_prompt: &str) -> Result<String> {
+        let request = OpenAIRequest {
+            model: "gpt-4o-mini".to_string(),
             messages: vec![
                 ChatMessage {
                     role: "system".to_string(),
@@ -81,16 +100,56 @@ impl LlmClient {
             temperature: 0.7,
         };
 
-        let mut req = self.client.post(&url).json(&request);
-        for (key, value) in headers {
-            req = req.header(key, value);
+        let response = self.client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&request)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(anyhow!("OpenAI API error ({}): {}", status, error_text));
         }
 
-        let response: ChatResponse = req.send().await?.json().await?;
-
+        let response: OpenAIResponse = response.json().await?;
         Ok(response.choices.first()
             .map(|c| c.message.content.clone())
             .unwrap_or_default())
+    }
+
+    async fn complete_ollama(&self, url: &str, model: &str, system_prompt: &str, user_prompt: &str) -> Result<String> {
+        let request = OllamaRequest {
+            model: model.to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt.to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: user_prompt.to_string(),
+                },
+            ],
+            stream: false,
+        };
+
+        let api_url = format!("{}/api/chat", url);
+        let response = self.client
+            .post(&api_url)
+            .json(&request)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(anyhow!("Ollama API error ({}): {}. Is Ollama running?", status, error_text));
+        }
+
+        let response: OllamaResponse = response.json().await?;
+        Ok(response.message.content)
     }
 
     /// Generate a meeting summary
