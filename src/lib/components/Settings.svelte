@@ -26,7 +26,7 @@
     supported_languages: string[];
   }
 
-  let { onClose }: { onClose: () => void } = $props();
+  let { onClose, inline = false }: { onClose: () => void; inline?: boolean } = $props();
 
   let settings = $state<Settings>({
     llm_provider: "ollama",
@@ -100,17 +100,19 @@
   });
 </script>
 
-<!-- Backdrop -->
-<div
-  class="fixed inset-0 bg-black/70 backdrop-blur-md z-40"
-  onclick={onClose}
-  onkeydown={(e) => e.key === "Escape" && onClose()}
-  role="button"
-  tabindex="-1"
-></div>
+{#if !inline}
+  <!-- Backdrop -->
+  <div
+    class="fixed inset-0 bg-black/70 backdrop-blur-md z-40"
+    onclick={onClose}
+    onkeydown={(e) => e.key === "Escape" && onClose()}
+    role="button"
+    tabindex="-1"
+  ></div>
+{/if}
 
-<!-- Modal -->
-<div class="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-sidecar-border shadow-glow-surface z-50 flex flex-col overflow-hidden">
+<!-- Modal / Inline Container -->
+<div class="{inline ? 'flex flex-col h-full' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-sidecar-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
   <!-- Header -->
   <div class="flex items-center justify-between px-6 py-4 border-b border-sidecar-border/50">
     <div class="flex items-center gap-3">
@@ -122,14 +124,17 @@
       </div>
       <h2 class="text-lg font-semibold text-sidecar-text">Settings</h2>
     </div>
-    <button
-      onclick={onClose}
-      class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
-    >
-      <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-      </svg>
-    </button>
+    {#if !inline}
+      <button
+        onclick={onClose}
+        class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
+        title="Close settings"
+      >
+        <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    {/if}
   </div>
 
   {#if isLoading}
@@ -340,12 +345,14 @@
 
     <!-- Footer -->
     <div class="flex justify-end gap-3 px-6 py-4 border-t border-sidecar-border/50">
-      <button
-        onclick={onClose}
-        class="px-4 py-2.5 rounded-xl text-sm font-medium text-sidecar-text-muted hover:text-sidecar-text hover:bg-sidecar-surface transition-colors"
-      >
-        Cancel
-      </button>
+      {#if !inline}
+        <button
+          onclick={onClose}
+          class="px-4 py-2.5 rounded-xl text-sm font-medium text-sidecar-text-muted hover:text-sidecar-text hover:bg-sidecar-surface transition-colors"
+        >
+          Cancel
+        </button>
+      {/if}
       <button
         onclick={saveSettings}
         disabled={isSaving}
