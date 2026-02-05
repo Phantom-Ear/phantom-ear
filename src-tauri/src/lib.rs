@@ -32,6 +32,7 @@ pub fn run() {
             commands::save_settings,
             commands::check_model_status,
             commands::download_model,
+            commands::load_model,
             commands::get_models_info,
             commands::list_audio_devices,
         ])

@@ -460,6 +460,44 @@ pub async fn download_model(
     Ok(())
 }
 
+/// Load an already-downloaded model into memory
+#[tauri::command]
+pub async fn load_model(
+    model_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let model: WhisperModel = model_name.parse()
+        .map_err(|e: anyhow::Error| e.to_string())?;
+
+    // Check if model is downloaded
+    let model_path = asr::get_model_path(model)
+        .map_err(|e| format!("Failed to get model path: {}", e))?;
+
+    if !model_path.exists() {
+        return Err(format!("Model {} is not downloaded", model_name));
+    }
+
+    // Check if already loaded
+    {
+        let engine = state.transcription_engine.lock().await;
+        if engine.is_some() {
+            log::info!("Model already loaded");
+            return Ok(());
+        }
+    }
+
+    // Load the model
+    log::info!("Loading model {} from {:?}", model_name, model_path);
+    let mut engine = TranscriptionEngine::new();
+    engine.load_model(&model_path)
+        .map_err(|e| format!("Failed to load model: {}", e))?;
+
+    *state.transcription_engine.lock().await = Some(engine);
+
+    log::info!("Model {} loaded and ready", model_name);
+    Ok(())
+}
+
 // ============================================================================
 // Audio Device Commands
 // ============================================================================
