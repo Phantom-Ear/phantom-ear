@@ -45,6 +45,11 @@
   let currentLanguage = $state("en");
   let currentModel = $state("base");
   let models = $state<ModelInfo[]>([]);
+  let llmProvider = $state("ollama");
+  let llmModelName = $state("");
+
+  // Export state
+  let exportCopied = $state(false);
 
   const languageNames: Record<string, string> = {
     auto: "Auto-detect",
@@ -73,7 +78,7 @@
       const status = await invoke<ModelStatus>("check_model_status");
       needsSetup = !status.whisper_downloaded;
 
-      // Load current settings and models
+      // Load current settings, models, and meetings
       try {
         const [settings, loadedModels] = await Promise.all([
           invoke<SettingsType>("get_settings"),
@@ -82,9 +87,14 @@
         currentLanguage = settings.language;
         currentModel = settings.whisper_model;
         models = loadedModels;
+        llmProvider = settings.llm_provider;
+        llmModelName = settings.ollama_model || "";
       } catch (e) {
         console.error("Failed to load settings:", e);
       }
+
+      // Load meetings from DB
+      await meetingsStore.loadMeetings();
 
       // If model is downloaded, load it into memory
       if (status.whisper_downloaded) {
@@ -138,8 +148,8 @@
       // Add to local transcript
       transcript = [...transcript, segment];
 
-      // Also add to active meeting
-      meetingsStore.addTranscriptSegment(segment);
+      // Also add to active meeting (optimistic UI)
+      meetingsStore.addLocalSegment(segment);
 
       // Auto-scroll to bottom
       requestAnimationFrame(() => {
@@ -187,11 +197,14 @@
         // Update with final transcript from backend (includes any remaining segments)
         if (result.length > 0) {
           transcript = result;
-          meetingsStore.setTranscript(result);
+          meetingsStore.setActiveTranscript(result);
         }
       } catch (e) {
         console.error("Failed to stop recording:", e);
       }
+
+      // Refresh meetings list to show updated segment counts
+      await meetingsStore.loadMeetings();
     } else {
       // Start recording
       try {
@@ -201,14 +214,17 @@
         summary = null;
         recordingDuration = 0;
 
-        // Create a new meeting
-        meetingsStore.createMeeting();
-
         // Start listening for transcription events BEFORE starting recording
         await startTranscriptionListener();
 
-        await invoke("start_recording");
+        // start_recording now returns meeting ID
+        const meetingId = await invoke<string>("start_recording");
         isRecording = true;
+
+        // Set active meeting and refresh list
+        meetingsStore.setActive(meetingId);
+        meetingsStore.setActiveTranscript([]);
+        await meetingsStore.loadMeetings();
 
         timerInterval = setInterval(() => {
           recordingDuration++;
@@ -254,12 +270,9 @@
     currentView = view;
   }
 
-  function handleSelectMeeting(id: string) {
-    meetingsStore.setActive(id);
-    const meeting = meetingsStore.meetings.find(m => m.id === id);
-    if (meeting) {
-      transcript = meeting.transcript;
-    }
+  async function handleSelectMeeting(id: string) {
+    await meetingsStore.selectMeeting(id);
+    transcript = meetingsStore.activeTranscript;
     currentView = 'home';
   }
 
@@ -346,10 +359,29 @@
       currentLanguage = settings.language;
       currentModel = settings.whisper_model;
       models = loadedModels;
+      llmProvider = settings.llm_provider;
+      llmModelName = settings.ollama_model || "";
     } catch (e) {
       console.error("Failed to refresh settings:", e);
     }
     currentView = 'home';
+  }
+
+  async function handleExportMeeting() {
+    const meetingId = meetingsStore.activeMeetingId;
+    if (!meetingId) return;
+    try {
+      const md = await meetingsStore.exportMeeting(meetingId, 'markdown');
+      await navigator.clipboard.writeText(md);
+      exportCopied = true;
+      setTimeout(() => { exportCopied = false; }, 2000);
+    } catch (e) {
+      console.error("Failed to export meeting:", e);
+    }
+  }
+
+  function handleSearch(query: string) {
+    meetingsStore.searchMeetings(query);
   }
 
   // Derived values for sidebar
@@ -378,6 +410,7 @@
       onRenameMeeting={(id, title) => meetingsStore.renameMeeting(id, title)}
       onTogglePinMeeting={(id) => meetingsStore.togglePin(id)}
       onDeleteMeeting={(id) => meetingsStore.deleteMeeting(id)}
+      onSearch={handleSearch}
     />
 
     <!-- Main Content -->
@@ -387,6 +420,8 @@
         language={currentLanguage}
         currentModel={currentModel}
         {models}
+        {llmProvider}
+        {llmModelName}
         onLanguageChange={handleLanguageChange}
         onModelChange={handleModelChange}
         onDownloadModel={handleDownloadModel}
@@ -432,14 +467,14 @@
               </p>
             </div>
 
-            <!-- Transcript Area -->
+            <!-- Transcript + AI Results Area -->
             <div class="flex-1 flex flex-col min-h-0">
               <!-- Collapsible Header -->
-              <button
-                onclick={() => transcriptCollapsed = !transcriptCollapsed}
-                class="flex items-center justify-between mb-3 group"
-              >
-                <div class="flex items-center gap-2">
+              <div class="flex items-center justify-between mb-3">
+                <button
+                  onclick={() => transcriptCollapsed = !transcriptCollapsed}
+                  class="flex items-center gap-2 group"
+                >
                   <svg
                     class="w-4 h-4 text-sidecar-text-muted transition-transform {transcriptCollapsed ? '-rotate-90' : ''}"
                     fill="none"
@@ -449,15 +484,26 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                   </svg>
                   <h2 class="text-sm font-medium text-sidecar-text-muted uppercase tracking-wide">Live Transcript</h2>
+                </button>
+                <div class="flex items-center gap-2">
+                  {#if transcript.length > 0}
+                    <span class="text-xs text-sidecar-text-muted">{transcript.length} segments</span>
+                  {/if}
+                  {#if transcript.length > 0 && !isRecording}
+                    <button
+                      onclick={handleExportMeeting}
+                      class="px-2 py-1 text-xs rounded-md bg-sidecar-surface border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-accent transition-colors"
+                      title="Export transcript to clipboard"
+                    >
+                      {exportCopied ? 'Copied!' : 'Export'}
+                    </button>
+                  {/if}
                 </div>
-                {#if transcript.length > 0}
-                  <span class="text-xs text-sidecar-text-muted">{transcript.length} segments</span>
-                {/if}
-              </button>
+              </div>
 
               {#if !transcriptCollapsed}
                 <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-hidden shadow-glow-surface transition-all duration-200">
-                  {#if transcript.length === 0}
+                  {#if transcript.length === 0 && !summary && !answer}
                     <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
                       <div class="w-14 h-14 mb-4 rounded-2xl bg-sidecar-surface/50 flex items-center justify-center">
                         <svg class="w-7 h-7 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -479,6 +525,67 @@
                           <p class="text-sm leading-relaxed text-sidecar-text">{segment.text}</p>
                         </div>
                       {/each}
+
+                      <!-- Summary Display (inside scroll) -->
+                      {#if summary}
+                        <div class="mt-4 p-4 rounded-xl bg-sidecar-purple/5 border border-sidecar-purple/20">
+                          <div class="flex items-center gap-2 mb-3">
+                            <div class="w-5 h-5 rounded-full bg-sidecar-purple flex items-center justify-center">
+                              <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                            </div>
+                            <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">Meeting Summary</h3>
+                          </div>
+
+                          {#if summary.overview}
+                            <p class="text-sm text-sidecar-text leading-relaxed mb-4">{summary.overview}</p>
+                          {/if}
+
+                          {#if summary.key_points.length > 0}
+                            <div class="mb-3">
+                              <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Key Points</h4>
+                              <ul class="space-y-1">
+                                {#each summary.key_points as point}
+                                  <li class="flex items-start gap-2 text-sm text-sidecar-text">
+                                    <span class="text-sidecar-accent mt-1">&#8226;</span>
+                                    <span>{point}</span>
+                                  </li>
+                                {/each}
+                              </ul>
+                            </div>
+                          {/if}
+
+                          {#if summary.action_items.length > 0}
+                            <div>
+                              <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Action Items</h4>
+                              <ul class="space-y-1">
+                                {#each summary.action_items as item}
+                                  <li class="flex items-start gap-2 text-sm text-sidecar-text">
+                                    <span class="text-sidecar-success mt-1">&#10003;</span>
+                                    <span>{item}</span>
+                                  </li>
+                                {/each}
+                              </ul>
+                            </div>
+                          {/if}
+                        </div>
+                      {/if}
+
+                      <!-- Answer Display (inside scroll) -->
+                      {#if answer}
+                        <div class="mt-4 p-4 rounded-xl bg-sidecar-accent/5 border border-sidecar-accent/20">
+                          <div class="flex items-center gap-2 mb-2">
+                            <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
+                              <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                              </svg>
+                            </div>
+                            <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">AI Answer</h3>
+                          </div>
+                          <p class="text-sm text-sidecar-text whitespace-pre-wrap leading-relaxed">{answer}</p>
+                        </div>
+                      {/if}
                     </div>
                   {/if}
                 </div>
@@ -489,115 +596,65 @@
               {/if}
             </div>
 
-            <!-- Summary Display -->
-            {#if summary}
-              <div class="mt-4 p-4 glass rounded-xl border border-sidecar-border shadow-glow-surface">
-                <div class="flex items-center gap-2 mb-3">
-                  <div class="w-5 h-5 rounded-full bg-sidecar-purple flex items-center justify-center">
-                    <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
-                  <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">Meeting Summary</h3>
-                </div>
-
-                {#if summary.overview}
-                  <p class="text-sm text-sidecar-text leading-relaxed mb-4">{summary.overview}</p>
-                {/if}
-
-                {#if summary.key_points.length > 0}
-                  <div class="mb-3">
-                    <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Key Points</h4>
-                    <ul class="space-y-1">
-                      {#each summary.key_points as point}
-                        <li class="flex items-start gap-2 text-sm text-sidecar-text">
-                          <span class="text-sidecar-accent mt-1">•</span>
-                          <span>{point}</span>
-                        </li>
-                      {/each}
-                    </ul>
-                  </div>
-                {/if}
-
-                {#if summary.action_items.length > 0}
-                  <div>
-                    <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Action Items</h4>
-                    <ul class="space-y-1">
-                      {#each summary.action_items as item}
-                        <li class="flex items-start gap-2 text-sm text-sidecar-text">
-                          <span class="text-sidecar-success mt-1">✓</span>
-                          <span>{item}</span>
-                        </li>
-                      {/each}
-                    </ul>
-                  </div>
-                {/if}
-              </div>
-            {/if}
-
-            <!-- Answer Display -->
-            {#if answer}
-              <div class="mt-4 p-4 glass rounded-xl border border-sidecar-border shadow-glow-accent">
-                <div class="flex items-center gap-2 mb-2">
-                  <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
-                    <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
-                  <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">AI Answer</h3>
-                </div>
-                <p class="text-sm text-sidecar-text whitespace-pre-wrap leading-relaxed">{answer}</p>
-              </div>
-            {/if}
-
-            <!-- Q&A Input -->
+            <!-- ChatGPT-style Input Bar -->
             <div class="mt-4">
               <form
                 onsubmit={(e) => {
                   e.preventDefault();
                   askQuestion();
                 }}
-                class="flex gap-2"
+                class="relative flex items-center"
               >
                 <input
                   type="text"
                   bind:value={question}
                   placeholder="Ask a question about the meeting..."
                   disabled={transcript.length === 0}
-                  class="flex-1 px-4 py-3 glass border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent focus:shadow-glow-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="w-full pl-4 pr-28 py-3.5 glass border border-sidecar-border rounded-2xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
-                <button
-                  type="submit"
-                  disabled={!question.trim() || isAsking || transcript.length === 0}
-                  class="px-4 py-3 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
-                >
-                  {#if isAsking}
-                    <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                    </svg>
-                  {:else}
-                    Ask
-                  {/if}
-                </button>
-                <button
-                  type="button"
-                  onclick={generateSummary}
-                  disabled={isGeneratingSummary || transcript.length === 0}
-                  class="px-4 py-3 bg-sidecar-purple hover:bg-sidecar-purple/80 rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none btn-shine"
-                  title="Generate meeting summary"
-                >
-                  {#if isGeneratingSummary}
-                    <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                    </svg>
-                  {:else}
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  {/if}
-                </button>
+                <!-- Icons inside the input, right side -->
+                <div class="absolute right-2 flex items-center gap-1">
+                  <!-- Summary button -->
+                  <button
+                    type="button"
+                    onclick={generateSummary}
+                    disabled={isGeneratingSummary || transcript.length === 0}
+                    class="p-2 rounded-lg text-sidecar-text-muted hover:text-sidecar-purple hover:bg-sidecar-surface transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-sidecar-text-muted disabled:hover:bg-transparent"
+                    title="Generate summary"
+                  >
+                    {#if isGeneratingSummary}
+                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                      </svg>
+                    {:else}
+                      <!-- Document/summary icon -->
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    {/if}
+                  </button>
+
+                  <!-- Send button -->
+                  <button
+                    type="submit"
+                    disabled={!question.trim() || isAsking || transcript.length === 0}
+                    class="p-2 rounded-xl bg-sidecar-text text-sidecar-bg hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
+                    title="Send question"
+                  >
+                    {#if isAsking}
+                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                      </svg>
+                    {:else}
+                      <!-- Arrow up icon -->
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                      </svg>
+                    {/if}
+                  </button>
+                </div>
               </form>
             </div>
           </div>

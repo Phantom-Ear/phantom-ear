@@ -5,6 +5,8 @@
     language = 'en',
     currentModel = 'base',
     models = [],
+    llmProvider = 'ollama',
+    llmModelName = '',
     onLanguageChange,
     onModelChange,
     onDownloadModel,
@@ -12,6 +14,8 @@
     language?: string;
     currentModel?: string;
     models?: ModelInfo[];
+    llmProvider?: string;
+    llmModelName?: string;
     onLanguageChange: (lang: string) => void;
     onModelChange: (model: string) => void;
     onDownloadModel: (model: string) => void;
@@ -56,6 +60,12 @@
       showEngineDropdown = false;
     }
   }
+
+  let llmLabel = $derived(() => {
+    if (llmProvider === 'openai') return 'OpenAI';
+    if (llmModelName) return llmModelName;
+    return 'Ollama';
+  });
 </script>
 
 <header class="flex items-center justify-end px-4 py-3 border-b border-sidecar-border/50 bg-sidecar-bg">
@@ -78,11 +88,11 @@
       </button>
 
       {#if showLanguageDropdown}
-        <div class="absolute right-0 top-full mt-1 py-1 bg-sidecar-surface border border-sidecar-border rounded-lg shadow-lg z-20 min-w-40 max-h-64 overflow-y-auto">
+        <div class="absolute right-0 top-full mt-1 py-1 bg-sidecar-surface border border-sidecar-border rounded-lg shadow-lg z-20 min-w-44 max-h-72 overflow-y-auto">
           {#each languages as lang}
             <button
               onclick={() => selectLanguage(lang.code)}
-              class="w-full px-3 py-2 text-left text-sm hover:bg-sidecar-surface-hover flex items-center justify-between {language === lang.code ? 'text-sidecar-accent' : 'text-sidecar-text'}"
+              class="w-full px-3 py-2.5 text-left text-sm hover:bg-sidecar-surface-hover flex items-center justify-between {language === lang.code ? 'text-sidecar-accent' : 'text-sidecar-text'}"
             >
               <span>{lang.name}</span>
               {#if language === lang.code}
@@ -112,27 +122,27 @@
       </button>
 
       {#if showEngineDropdown}
-        <div class="absolute right-0 top-full mt-1 py-1 bg-sidecar-surface border border-sidecar-border rounded-lg shadow-lg z-20 min-w-48">
+        <div class="absolute right-0 top-full mt-1 py-1 bg-sidecar-surface border border-sidecar-border rounded-lg shadow-lg z-20 w-56 max-h-96 overflow-y-auto">
           <div class="px-3 py-2 text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide border-b border-sidecar-border/50">
             Whisper Models
           </div>
-          {#each models as model}
+          {#each models.filter(m => m.backend === 'whisper') as model}
             <button
               onclick={() => selectModel(model)}
-              class="w-full px-3 py-2 text-left hover:bg-sidecar-surface-hover flex items-center justify-between"
+              class="w-full px-3 py-2.5 text-left hover:bg-sidecar-surface-hover flex items-center justify-between gap-3"
             >
-              <div>
-                <span class="text-sm capitalize {currentModel === model.name ? 'text-sidecar-accent' : 'text-sidecar-text'}">{model.name}</span>
-                <span class="text-xs text-sidecar-text-muted ml-2">{model.size_mb} MB</span>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-sm font-medium capitalize {currentModel === model.name ? 'text-sidecar-accent' : 'text-sidecar-text'}">{model.name}</span>
+                <span class="text-xs text-sidecar-text-muted whitespace-nowrap">{model.size_mb} MB</span>
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5 shrink-0">
                 {#if model.downloaded}
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-sidecar-success/20 text-sidecar-success">Ready</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-sidecar-success/20 text-sidecar-success whitespace-nowrap">Ready</span>
                 {:else}
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-sidecar-accent/20 text-sidecar-accent">Download</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-sidecar-accent/20 text-sidecar-accent whitespace-nowrap">Download</span>
                 {/if}
                 {#if currentModel === model.name}
-                  <svg class="w-4 h-4 text-sidecar-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-4 h-4 text-sidecar-accent shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                   </svg>
                 {/if}
@@ -142,15 +152,47 @@
 
           <div class="border-t border-sidecar-border/50 mt-1 pt-1">
             <div class="px-3 py-2 text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide">
-              Other Engines
+              Parakeet Models
             </div>
-            <div class="px-3 py-2 flex items-center justify-between opacity-60">
-              <span class="text-sm text-sidecar-text">Parakeet</span>
-              <span class="text-xs px-1.5 py-0.5 rounded bg-sidecar-warning/20 text-sidecar-warning">Coming Soon</span>
-            </div>
+            <p class="px-3 pb-1 text-xs text-sidecar-text-muted">English only, fast ONNX inference</p>
+            {#each models.filter(m => m.backend === 'parakeet') as model}
+              <button
+                onclick={() => selectModel(model)}
+                class="w-full px-3 py-2.5 text-left hover:bg-sidecar-surface-hover flex items-center justify-between gap-3"
+              >
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-sm font-medium {currentModel === model.name ? 'text-sidecar-accent' : 'text-sidecar-text'}">{model.name}</span>
+                  <span class="text-xs text-sidecar-text-muted whitespace-nowrap">{model.size_mb} MB</span>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  {#if model.downloaded}
+                    <span class="text-xs px-1.5 py-0.5 rounded bg-sidecar-success/20 text-sidecar-success whitespace-nowrap">Ready</span>
+                  {:else}
+                    <span class="text-xs px-1.5 py-0.5 rounded bg-sidecar-accent/20 text-sidecar-accent whitespace-nowrap">Download</span>
+                  {/if}
+                  {#if currentModel === model.name}
+                    <svg class="w-4 h-4 text-sidecar-accent shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                  {/if}
+                </div>
+              </button>
+            {/each}
           </div>
         </div>
       {/if}
+    </div>
+
+    <!-- LLM Provider Indicator -->
+    <div
+      class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-sidecar-surface border border-sidecar-border"
+      title="LLM: {llmLabel()}"
+    >
+      <!-- Brain icon -->
+      <svg class="w-4 h-4 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+      </svg>
+      <span class="text-xs font-medium text-sidecar-text">{llmLabel()}</span>
     </div>
   </div>
 </header>
