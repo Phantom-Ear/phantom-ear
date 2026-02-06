@@ -2,6 +2,58 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Phases
+
+### Phase 1: Project Setup ✅
+- Initialize Tauri 2.0 + Svelte 5 project
+- Configure TailwindCSS v4 with custom dark theme
+- Set up project structure and CLAUDE.md
+- Git repository initialization
+
+### Phase 2: Core Infrastructure ✅
+- Audio capture module using cpal (cross-platform)
+- Whisper ASR integration via whisper-rs
+- Model download system with progress events
+- Basic UI with Setup flow for first-run model download
+
+### Phase 3: Real-time Transcription ✅
+- Transcription pipeline (5-second audio chunks)
+- Silence detection to skip quiet audio
+- Real-time event emission to frontend
+- Live transcript display with auto-scroll
+- Model loading on app restart fix
+
+### Phase 4: Settings & Language Support ✅
+- Settings UI panel (language, model selection, LLM config)
+- Apply language setting to transcription engine
+- LLM provider configuration (Ollama/OpenAI)
+
+### Phase 5: LLM Integration ✅
+- Ollama client for local LLM inference
+- OpenAI API client
+- RAG-based Q&A using transcript context
+- Meeting summary generation with structured output
+
+### Phase 6: Meeting Persistence (Upcoming)
+- Save transcripts to SQLite database
+- Meeting history browser
+- Export to text/markdown/PDF
+- Search across past meetings
+
+### Phase 7: Embeddings & Semantic Search (Upcoming)
+- BGE-small embedding generation
+- sqlite-vec for vector storage
+- Semantic search across transcripts
+- Context retrieval for Q&A
+
+### Phase 8: Polish & Distribution (Upcoming)
+- Meeting app auto-detection
+- System tray integration
+- Auto-update mechanism
+- macOS/Windows installers
+
+---
+
 ## Project Overview
 
 **Sidecar** - A privacy-first desktop meeting assistant that provides real-time transcription, contextual Q&A, and automated summaries without joining meetings or leaking raw data.
@@ -84,12 +136,19 @@ sidecar/
 - Downloads models to `~/Library/Application Support/com.sidecar.Sidecar/models/`
 - Emits `model-download-progress` events to frontend
 
+### Transcription (`src-tauri/src/transcription/`)
+- Processes audio in 5-second chunks
+- Silence threshold detection (RMS < 0.01)
+- Emits `transcription` events to frontend in real-time
+
 ### Commands (`src-tauri/src/commands.rs`)
-- `start_recording` / `stop_recording` - Audio capture control
+- `start_recording` / `stop_recording` - Audio capture + transcription control
 - `download_model` - Download and load Whisper model
-- `check_model_status` - Check if model exists
-- `get_models_info` - List all available models
+- `load_model` - Load already-downloaded model into memory
+- `check_model_status` - Check if model file exists
+- `get_models_info` - List all available models with download status
 - `ask_question` / `generate_summary` - LLM features (requires config)
+- `get_settings` / `save_settings` - User preferences
 
 ## Frontend
 
@@ -112,6 +171,11 @@ import { listen } from "@tauri-apps/api/event";
 // Model download progress
 await listen<DownloadProgress>("model-download-progress", (event) => {
   console.log(event.payload.percentage);
+});
+
+// Real-time transcription
+await listen<TranscriptionEvent>("transcription", (event) => {
+  const { id, text, start_ms, end_ms, is_partial } = event.payload;
 });
 ```
 

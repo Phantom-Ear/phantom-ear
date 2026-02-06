@@ -1,21 +1,54 @@
 @import "tailwindcss";
 
-/* Custom theme variables */
+/* Theme CSS Variables */
+:root {
+  /* Dark theme (default) - ChatGPT-style soft gray */
+  --sidecar-bg: #212121;
+  --sidecar-surface: #2f2f2f;
+  --sidecar-surface-hover: #3a3a3a;
+  --sidecar-border: #424242;
+  --sidecar-text: #ececec;
+  --sidecar-text-muted: #9a9a9a;
+  --sidecar-accent: #3b82f6;
+  --sidecar-accent-hover: #2563eb;
+  --sidecar-success: #22c55e;
+  --sidecar-danger: #ef4444;
+  --sidecar-warning: #f59e0b;
+  --sidecar-purple: #8b5cf6;
+}
+
+:root[data-theme="light"] {
+  --sidecar-bg: #ffffff;
+  --sidecar-surface: #f4f4f4;
+  --sidecar-surface-hover: #e8e8e8;
+  --sidecar-border: #e0e0e0;
+  --sidecar-text: #1a1a1a;
+  --sidecar-text-muted: #666666;
+  --sidecar-accent: #3b82f6;
+  --sidecar-accent-hover: #2563eb;
+  --sidecar-success: #16a34a;
+  --sidecar-danger: #dc2626;
+  --sidecar-warning: #d97706;
+  --sidecar-purple: #7c3aed;
+}
+
+/* Custom theme variables for Tailwind */
 @theme {
   --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
-  /* Custom colors for Sidecar */
-  --color-sidecar-bg: #0a0a0b;
-  --color-sidecar-surface: #141416;
-  --color-sidecar-surface-hover: #1a1a1d;
-  --color-sidecar-border: #27272a;
-  --color-sidecar-text: #fafafa;
-  --color-sidecar-text-muted: #71717a;
-  --color-sidecar-accent: #3b82f6;
-  --color-sidecar-accent-hover: #2563eb;
-  --color-sidecar-success: #22c55e;
-  --color-sidecar-danger: #ef4444;
-  --color-sidecar-warning: #f59e0b;
+  /* Map CSS variables to Tailwind theme */
+  --color-sidecar-bg: var(--sidecar-bg);
+  --color-sidecar-surface: var(--sidecar-surface);
+  --color-sidecar-surface-hover: var(--sidecar-surface-hover);
+  --color-sidecar-border: var(--sidecar-border);
+  --color-sidecar-text: var(--sidecar-text);
+  --color-sidecar-text-muted: var(--sidecar-text-muted);
+  --color-sidecar-accent: var(--sidecar-accent);
+  --color-sidecar-accent-hover: var(--sidecar-accent-hover);
+  --color-sidecar-success: var(--sidecar-success);
+  --color-sidecar-danger: var(--sidecar-danger);
+  --color-sidecar-warning: var(--sidecar-warning);
+  --color-sidecar-purple: var(--sidecar-purple);
 }
 
 /* Global styles */
@@ -70,4 +103,216 @@ body {
 
 .animate-pulse-recording {
   animation: pulse-recording 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Fade in animation for transcript segments */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* ============================================================================
+   UI MODERNIZATION - Glassmorphism, Gradients & Glows
+   ============================================================================ */
+
+/* Glassmorphism effect */
+.glass {
+  background: rgba(47, 47, 47, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+:root[data-theme="light"] .glass {
+  background: rgba(244, 244, 244, 0.8);
+}
+
+.glass-strong {
+  background: rgba(47, 47, 47, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+:root[data-theme="light"] .glass-strong {
+  background: rgba(244, 244, 244, 0.9);
+}
+
+/* Recording glow animation */
+@keyframes recording-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.6), 0 0 40px rgba(239, 68, 68, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(239, 68, 68, 0.8), 0 0 60px rgba(239, 68, 68, 0.4);
+  }
+}
+
+.animate-recording-glow {
+  animation: recording-glow 2s ease-in-out infinite;
+}
+
+/* Idle glow for interactive elements */
+@keyframes idle-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.4), 0 0 30px rgba(59, 130, 246, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5), 0 0 40px rgba(59, 130, 246, 0.25);
+  }
+}
+
+.animate-idle-glow {
+  animation: idle-glow 3s ease-in-out infinite;
+}
+
+/* Gradient backgrounds */
+.bg-gradient-accent {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+}
+
+.bg-gradient-accent-hover {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+}
+
+.bg-gradient-danger {
+  background: linear-gradient(135deg, #ef4444, #f97316);
+}
+
+.bg-gradient-surface {
+  background: linear-gradient(180deg, rgba(47, 47, 47, 0.9) 0%, rgba(33, 33, 33, 0.95) 100%);
+}
+
+:root[data-theme="light"] .bg-gradient-surface {
+  background: linear-gradient(180deg, rgba(244, 244, 244, 0.9) 0%, rgba(255, 255, 255, 0.95) 100%);
+}
+
+/* Shadow glow effects */
+.shadow-glow-accent {
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.15), 0 0 40px rgba(59, 130, 246, 0.1);
+}
+
+.shadow-glow-danger {
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.2), 0 0 40px rgba(239, 68, 68, 0.1);
+}
+
+.shadow-glow-surface {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+/* Enhanced hover states */
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* Shimmer effect for loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Tab underline animation */
+.tab-indicator {
+  position: relative;
+}
+
+.tab-indicator::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  transform: scaleX(0);
+  transition: transform 0.2s ease;
+}
+
+.tab-indicator.active::after {
+  transform: scaleX(1);
+}
+
+/* Button shine effect */
+.btn-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-shine::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  transition: left 0.5s ease;
+}
+
+.btn-shine:hover::before {
+  left: 100%;
+}
+
+/* Ring pulse for recording state */
+@keyframes ring-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.animate-ring-pulse {
+  animation: ring-pulse 1.5s ease-out infinite;
+}
+
+/* Audio waveform bars animation */
+@keyframes audio-bars {
+  0%, 100% {
+    height: 4px;
+  }
+  50% {
+    height: 16px;
+  }
+}
+
+.audio-bar {
+  height: 4px;
+  animation: audio-bars 0.8s ease-in-out infinite;
 }

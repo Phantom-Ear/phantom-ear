@@ -1,18 +1,29 @@
 // Automatic Speech Recognition module
 // Handles transcription using Whisper models via whisper-rs
+// Parakeet backend available behind `parakeet` feature flag
+
+pub mod backend;
+#[cfg(feature = "parakeet")]
+pub mod mel;
+#[cfg(feature = "parakeet")]
+pub mod parakeet_backend;
+pub mod whisper_backend;
 
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+// Re-export backend types
+pub use backend::{AsrBackend, AsrBackendType, BackendInfo, TranscriptionResult, TranscriptionSegment};
+#[cfg(feature = "parakeet")]
+pub use parakeet_backend::{ParakeetBackend, ParakeetModel};
+pub use whisper_backend::WhisperBackend;
 
 /// Available Whisper model sizes
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WhisperModel {
     Tiny,    // ~75MB, fastest, lowest quality
     Base,    // ~142MB, good balance for real-time
-    Small,   // ~466MB, better quality
+    Small,   // ~466MB, recommended default
     Medium,  // ~1.5GB, high quality
     Large,   // ~2.9GB, best quality (slow)
 }
@@ -64,153 +75,78 @@ impl std::str::FromStr for WhisperModel {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TranscriptionSegment {
-    pub text: String,
-    pub start_ms: i64,
-    pub end_ms: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct TranscriptionResult {
-    pub segments: Vec<TranscriptionSegment>,
-    pub full_text: String,
-}
-
+/// Transcription engine that wraps an ASR backend
+/// Default backend is Whisper. Parakeet available with `parakeet` feature.
 pub struct TranscriptionEngine {
-    context: Option<Arc<Mutex<WhisperContext>>>,
-    model_path: Option<PathBuf>,
-    language: String,
+    backend: Box<dyn AsrBackend>,
+    backend_type: AsrBackendType,
 }
 
 impl TranscriptionEngine {
+    /// Create a new TranscriptionEngine with Whisper backend (default)
     pub fn new() -> Self {
         Self {
-            context: None,
-            model_path: None,
-            language: "en".to_string(),
+            backend: Box::new(WhisperBackend::new()),
+            backend_type: AsrBackendType::Whisper,
         }
+    }
+
+    /// Create a new TranscriptionEngine with a specific backend
+    pub fn with_backend(backend_type: AsrBackendType) -> Result<Self> {
+        let backend: Box<dyn AsrBackend> = match backend_type {
+            AsrBackendType::Whisper => Box::new(WhisperBackend::new()),
+            AsrBackendType::Parakeet => {
+                #[cfg(feature = "parakeet")]
+                {
+                    Box::new(ParakeetBackend::new())
+                }
+                #[cfg(not(feature = "parakeet"))]
+                {
+                    return Err(anyhow!(
+                        "Parakeet backend is not available. Rebuild with `--features parakeet` to enable it."
+                    ));
+                }
+            }
+        };
+        Ok(Self {
+            backend,
+            backend_type,
+        })
+    }
+
+    /// Get the current backend type
+    pub fn backend_type(&self) -> AsrBackendType {
+        self.backend_type
+    }
+
+    /// Get the backend name
+    pub fn backend_name(&self) -> &str {
+        self.backend.name()
     }
 
     /// Set the language for transcription (e.g., "en", "es", "fr", "auto")
     pub fn set_language(&mut self, lang: &str) {
-        self.language = lang.to_string();
+        self.backend.set_language(lang);
     }
 
-    /// Load the Whisper model from a file path
+    /// Get the current language
+    pub fn language(&self) -> &str {
+        self.backend.language()
+    }
+
+    /// Load a model from a file path
     pub fn load_model(&mut self, model_path: &PathBuf) -> Result<()> {
-        log::info!("Loading Whisper model from: {:?}", model_path);
-
-        if !model_path.exists() {
-            return Err(anyhow!("Model file not found: {:?}", model_path));
-        }
-
-        let params = WhisperContextParameters::default();
-        let ctx = WhisperContext::new_with_params(
-            model_path.to_str().ok_or_else(|| anyhow!("Invalid path"))?,
-            params,
-        ).map_err(|e| anyhow!("Failed to load Whisper model: {:?}", e))?;
-
-        self.context = Some(Arc::new(Mutex::new(ctx)));
-        self.model_path = Some(model_path.clone());
-
-        log::info!("Whisper model loaded successfully");
-        Ok(())
+        self.backend.load_model(model_path)
     }
 
     /// Check if a model is loaded
     pub fn is_loaded(&self) -> bool {
-        self.context.is_some()
-    }
-
-    /// Get the loaded model path
-    pub fn model_path(&self) -> Option<&PathBuf> {
-        self.model_path.as_ref()
+        self.backend.is_loaded()
     }
 
     /// Transcribe audio samples (must be 16kHz mono f32)
     pub async fn transcribe(&self, audio_samples: &[f32]) -> Result<TranscriptionResult> {
-        let context = self.context.as_ref()
-            .ok_or_else(|| anyhow!("No model loaded"))?;
-
-        if audio_samples.is_empty() {
-            return Ok(TranscriptionResult {
-                segments: vec![],
-                full_text: String::new(),
-            });
-        }
-
-        let ctx = context.lock().await;
-
-        // Create a new state for this transcription
-        let mut state = ctx.create_state()
-            .map_err(|e| anyhow!("Failed to create state: {:?}", e))?;
-
-        // Configure transcription parameters
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-
-        // Set language
-        if self.language == "auto" {
-            params.set_language(None); // Auto-detect
-        } else {
-            params.set_language(Some(&self.language));
-        }
-
-        // Optimize for real-time transcription
-        params.set_translate(false);
-        params.set_no_context(true);
-        params.set_single_segment(false);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_suppress_blank(true);
-        params.set_suppress_non_speech_tokens(true);
-
-        // Run transcription
-        state.full(params, audio_samples)
-            .map_err(|e| anyhow!("Transcription failed: {:?}", e))?;
-
-        // Extract segments
-        let num_segments = state.full_n_segments()
-            .map_err(|e| anyhow!("Failed to get segments: {:?}", e))?;
-
-        let mut segments = Vec::new();
-        let mut full_text = String::new();
-
-        for i in 0..num_segments {
-            let text = state.full_get_segment_text(i)
-                .map_err(|e| anyhow!("Failed to get segment text: {:?}", e))?;
-
-            let start = state.full_get_segment_t0(i)
-                .map_err(|e| anyhow!("Failed to get segment start: {:?}", e))?;
-
-            let end = state.full_get_segment_t1(i)
-                .map_err(|e| anyhow!("Failed to get segment end: {:?}", e))?;
-
-            // Convert from centiseconds to milliseconds
-            let start_ms = (start as i64) * 10;
-            let end_ms = (end as i64) * 10;
-
-            let trimmed_text = text.trim().to_string();
-            if !trimmed_text.is_empty() {
-                if !full_text.is_empty() {
-                    full_text.push(' ');
-                }
-                full_text.push_str(&trimmed_text);
-
-                segments.push(TranscriptionSegment {
-                    text: trimmed_text,
-                    start_ms,
-                    end_ms,
-                });
-            }
-        }
-
-        Ok(TranscriptionResult {
-            segments,
-            full_text,
-        })
+        self.backend.transcribe(audio_samples).await
     }
 
     /// Transcribe with a time offset (for streaming transcription)
@@ -219,19 +155,31 @@ impl TranscriptionEngine {
         audio_samples: &[f32],
         offset_ms: i64,
     ) -> Result<TranscriptionResult> {
-        let mut result = self.transcribe(audio_samples).await?;
-
-        // Adjust timestamps with offset
-        for segment in &mut result.segments {
-            segment.start_ms += offset_ms;
-            segment.end_ms += offset_ms;
-        }
-
-        Ok(result)
+        self.backend.transcribe_with_offset(audio_samples, offset_ms).await
     }
 }
 
-/// Resample audio from source sample rate to 16kHz (required by Whisper)
+impl Default for TranscriptionEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Get available ASR backends info
+pub fn get_available_backends() -> Vec<BackendInfo> {
+    #[cfg(not(feature = "parakeet"))]
+    {
+        vec![BackendInfo::whisper()]
+    }
+    #[cfg(feature = "parakeet")]
+    {
+        let mut backends = vec![BackendInfo::whisper()];
+        backends.push(BackendInfo::parakeet());
+        backends
+    }
+}
+
+/// Resample audio from source sample rate to 16kHz (required by ASR engines)
 pub fn resample_to_16khz(samples: &[f32], source_rate: u32) -> Result<Vec<f32>> {
     if source_rate == 16000 {
         return Ok(samples.to_vec());
