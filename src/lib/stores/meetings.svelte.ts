@@ -1,135 +1,126 @@
-import type { Meeting, TranscriptSegment } from '$lib/types';
-
-const STORAGE_KEY = 'sidecar-meetings';
-
-function generateId(): string {
-  return `meeting-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function formatMeetingTitle(date: Date): string {
-  const day = date.toLocaleDateString('en-US', { weekday: 'short' });
-  const dateStr = date.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: '2-digit'
-  }).replace(/\//g, '/');
-  const time = date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  });
-  return `${day} ${dateStr} · ${time}`;
-}
-
-function loadMeetings(): Meeting[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch (e) {
-    console.error('Failed to load meetings:', e);
-  }
-  return [];
-}
-
-function saveMeetings(meetings: Meeting[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(meetings));
-  } catch (e) {
-    console.error('Failed to save meetings:', e);
-  }
-}
+import { invoke } from '@tauri-apps/api/core';
+import type { MeetingListItem, MeetingWithTranscript, TranscriptSegment, SearchResult } from '$lib/types';
 
 function createMeetingsStore() {
-  let meetings = $state<Meeting[]>(loadMeetings());
+  let meetings = $state<MeetingListItem[]>([]);
   let activeMeetingId = $state<string | null>(null);
+  let activeTranscript = $state<TranscriptSegment[]>([]);
+  let searchResults = $state<SearchResult[]>([]);
+  let searchQuery = $state('');
 
-  function createMeeting(): Meeting {
-    const meeting: Meeting = {
-      id: generateId(),
-      title: formatMeetingTitle(new Date()),
-      createdAt: new Date().toISOString(),
-      pinned: false,
-      transcript: [],
-    };
-    meetings = [meeting, ...meetings];
-    activeMeetingId = meeting.id;
-    saveMeetings(meetings);
-    return meeting;
-  }
-
-  function renameMeeting(id: string, newTitle: string) {
-    meetings = meetings.map(m =>
-      m.id === id ? { ...m, title: newTitle.trim() || m.title } : m
-    );
-    saveMeetings(meetings);
-  }
-
-  function togglePin(id: string) {
-    meetings = meetings.map(m =>
-      m.id === id ? { ...m, pinned: !m.pinned } : m
-    );
-    saveMeetings(meetings);
-  }
-
-  function deleteMeeting(id: string) {
-    meetings = meetings.filter(m => m.id !== id);
-    if (activeMeetingId === id) {
-      activeMeetingId = null;
+  async function loadMeetings() {
+    try {
+      meetings = await invoke<MeetingListItem[]>('list_meetings');
+    } catch (e) {
+      console.error('Failed to load meetings:', e);
     }
-    saveMeetings(meetings);
+  }
+
+  async function selectMeeting(id: string) {
+    activeMeetingId = id;
+    try {
+      const meeting = await invoke<MeetingWithTranscript>('get_meeting', { id });
+      activeTranscript = meeting.segments;
+    } catch (e) {
+      console.error('Failed to load meeting:', e);
+      activeTranscript = [];
+    }
   }
 
   function setActive(id: string | null) {
     activeMeetingId = id;
+    if (!id) {
+      activeTranscript = [];
+    }
   }
 
-  function addTranscriptSegment(segment: TranscriptSegment) {
-    if (!activeMeetingId) return;
-    meetings = meetings.map(m =>
-      m.id === activeMeetingId
-        ? { ...m, transcript: [...m.transcript, segment] }
-        : m
-    );
-    saveMeetings(meetings);
+  function setActiveTranscript(segments: TranscriptSegment[]) {
+    activeTranscript = segments;
   }
 
-  function setTranscript(transcript: TranscriptSegment[]) {
-    if (!activeMeetingId) return;
-    meetings = meetings.map(m =>
-      m.id === activeMeetingId
-        ? { ...m, transcript }
-        : m
-    );
-    saveMeetings(meetings);
+  function addLocalSegment(segment: TranscriptSegment) {
+    activeTranscript = [...activeTranscript, segment];
   }
 
-  function getActiveMeeting(): Meeting | undefined {
-    return meetings.find(m => m.id === activeMeetingId);
+  async function renameMeeting(id: string, newTitle: string) {
+    const title = newTitle.trim();
+    if (!title) return;
+    try {
+      await invoke('rename_meeting', { id, title });
+      meetings = meetings.map(m =>
+        m.id === id ? { ...m, title } : m
+      );
+    } catch (e) {
+      console.error('Failed to rename meeting:', e);
+    }
   }
 
-  function getPinnedMeetings(): Meeting[] {
+  async function togglePin(id: string) {
+    try {
+      await invoke('toggle_pin_meeting', { id });
+      meetings = meetings.map(m =>
+        m.id === id ? { ...m, pinned: !m.pinned } : m
+      );
+    } catch (e) {
+      console.error('Failed to toggle pin:', e);
+    }
+  }
+
+  async function deleteMeeting(id: string) {
+    try {
+      await invoke('delete_meeting', { id });
+      meetings = meetings.filter(m => m.id !== id);
+      if (activeMeetingId === id) {
+        activeMeetingId = null;
+        activeTranscript = [];
+      }
+    } catch (e) {
+      console.error('Failed to delete meeting:', e);
+    }
+  }
+
+  async function searchMeetings(query: string) {
+    searchQuery = query;
+    if (!query.trim()) {
+      searchResults = [];
+      return;
+    }
+    try {
+      searchResults = await invoke<SearchResult[]>('search_meetings', { query });
+    } catch (e) {
+      console.error('Failed to search meetings:', e);
+      searchResults = [];
+    }
+  }
+
+  async function exportMeeting(id: string, format: string = 'markdown'): Promise<string> {
+    return invoke<string>('export_meeting', { id, format });
+  }
+
+  function getPinnedMeetings(): MeetingListItem[] {
     return meetings.filter(m => m.pinned);
   }
 
-  function getRecentMeetings(): Meeting[] {
+  function getRecentMeetings(): MeetingListItem[] {
     return meetings.filter(m => !m.pinned);
   }
 
   return {
     get meetings() { return meetings; },
     get activeMeetingId() { return activeMeetingId; },
-    createMeeting,
+    get activeTranscript() { return activeTranscript; },
+    get searchResults() { return searchResults; },
+    get searchQuery() { return searchQuery; },
+    loadMeetings,
+    selectMeeting,
+    setActive,
+    setActiveTranscript,
+    addLocalSegment,
     renameMeeting,
     togglePin,
     deleteMeeting,
-    setActive,
-    addTranscriptSegment,
-    setTranscript,
-    getActiveMeeting,
+    searchMeetings,
+    exportMeeting,
     getPinnedMeetings,
     getRecentMeetings,
   };

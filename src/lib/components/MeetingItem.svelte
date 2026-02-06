@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Meeting } from '$lib/types';
+  import type { MeetingListItem } from '$lib/types';
 
   let {
     meeting,
@@ -10,7 +10,7 @@
     onTogglePin,
     onDelete,
   }: {
-    meeting: Meeting;
+    meeting: MeetingListItem;
     isActive?: boolean;
     collapsed?: boolean;
     onSelect: () => void;
@@ -78,11 +78,14 @@
         />
       {:else}
         <span class="block truncate text-sm text-sidecar-text">{meeting.title}</span>
+        {#if meeting.segment_count > 0}
+          <span class="text-xs text-sidecar-text-muted">{meeting.segment_count} segments</span>
+        {/if}
       {/if}
     </div>
 
     <!-- Actions -->
-    <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div class="flex items-center gap-1 transition-opacity {showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}">
       {#if meeting.pinned}
         <button
           onclick={(e) => { e.stopPropagation(); onTogglePin(); }}
@@ -111,7 +114,7 @@
         {#if showMenu}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
-            class="absolute right-0 top-full mt-1 py-1 bg-sidecar-surface border border-sidecar-border rounded-lg shadow-lg z-10 min-w-32"
+            class="absolute right-0 top-full mt-1 py-1 bg-sidecar-surface border border-sidecar-border rounded-lg shadow-lg z-50 min-w-32"
             onclick={(e) => e.stopPropagation()}
           >
             <button
@@ -153,7 +156,7 @@
 {#if showMenu}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="fixed inset-0 z-0"
+    class="fixed inset-0 z-40"
     onclick={() => showMenu = false}
   ></div>
 {/if}

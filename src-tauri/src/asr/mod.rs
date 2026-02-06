@@ -1,8 +1,11 @@
 // Automatic Speech Recognition module
 // Handles transcription using Whisper models via whisper-rs
-// Supports multiple backends: Whisper (default), Parakeet (coming soon)
+// Parakeet backend available behind `parakeet` feature flag
 
 pub mod backend;
+#[cfg(feature = "parakeet")]
+pub mod mel;
+#[cfg(feature = "parakeet")]
 pub mod parakeet_backend;
 pub mod whisper_backend;
 
@@ -11,6 +14,7 @@ use std::path::PathBuf;
 
 // Re-export backend types
 pub use backend::{AsrBackend, AsrBackendType, BackendInfo, TranscriptionResult, TranscriptionSegment};
+#[cfg(feature = "parakeet")]
 pub use parakeet_backend::{ParakeetBackend, ParakeetModel};
 pub use whisper_backend::WhisperBackend;
 
@@ -19,7 +23,7 @@ pub use whisper_backend::WhisperBackend;
 pub enum WhisperModel {
     Tiny,    // ~75MB, fastest, lowest quality
     Base,    // ~142MB, good balance for real-time
-    Small,   // ~466MB, better quality
+    Small,   // ~466MB, recommended default
     Medium,  // ~1.5GB, high quality
     Large,   // ~2.9GB, best quality (slow)
 }
@@ -72,7 +76,7 @@ impl std::str::FromStr for WhisperModel {
 }
 
 /// Transcription engine that wraps an ASR backend
-/// Default backend is Whisper, but can be switched to Parakeet
+/// Default backend is Whisper. Parakeet available with `parakeet` feature.
 pub struct TranscriptionEngine {
     backend: Box<dyn AsrBackend>,
     backend_type: AsrBackendType,
@@ -88,15 +92,26 @@ impl TranscriptionEngine {
     }
 
     /// Create a new TranscriptionEngine with a specific backend
-    pub fn with_backend(backend_type: AsrBackendType) -> Self {
+    pub fn with_backend(backend_type: AsrBackendType) -> Result<Self> {
         let backend: Box<dyn AsrBackend> = match backend_type {
             AsrBackendType::Whisper => Box::new(WhisperBackend::new()),
-            AsrBackendType::Parakeet => Box::new(ParakeetBackend::new()),
+            AsrBackendType::Parakeet => {
+                #[cfg(feature = "parakeet")]
+                {
+                    Box::new(ParakeetBackend::new())
+                }
+                #[cfg(not(feature = "parakeet"))]
+                {
+                    return Err(anyhow!(
+                        "Parakeet backend is not available. Rebuild with `--features parakeet` to enable it."
+                    ));
+                }
+            }
         };
-        Self {
+        Ok(Self {
             backend,
             backend_type,
-        }
+        })
     }
 
     /// Get the current backend type
@@ -152,13 +167,19 @@ impl Default for TranscriptionEngine {
 
 /// Get available ASR backends info
 pub fn get_available_backends() -> Vec<BackendInfo> {
-    vec![
-        BackendInfo::whisper(),
-        BackendInfo::parakeet(),
-    ]
+    #[cfg(not(feature = "parakeet"))]
+    {
+        vec![BackendInfo::whisper()]
+    }
+    #[cfg(feature = "parakeet")]
+    {
+        let mut backends = vec![BackendInfo::whisper()];
+        backends.push(BackendInfo::parakeet());
+        backends
+    }
 }
 
-/// Resample audio from source sample rate to 16kHz (required by Whisper)
+/// Resample audio from source sample rate to 16kHz (required by ASR engines)
 pub fn resample_to_16khz(samples: &[f32], source_rate: u32) -> Result<Vec<f32>> {
     if source_rate == 16000 {
         return Ok(samples.to_vec());

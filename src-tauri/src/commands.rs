@@ -1,10 +1,16 @@
 // Tauri IPC commands - bridge between frontend and Rust backend
 
 use crate::asr::{self, TranscriptionEngine, WhisperModel};
+#[cfg(feature = "parakeet")]
+use crate::asr::AsrBackendType;
+#[cfg(feature = "parakeet")]
+use crate::asr::parakeet_backend::ParakeetModel;
 use crate::audio::AudioCapture;
 use crate::llm::{LlmClient, LlmProvider};
 use crate::models::{self, ModelInfo};
-use crate::transcription::{TranscriptionConfig, run_transcription_loop};
+use crate::storage::{Database, MeetingListItem, SearchResult, SegmentRow};
+use crate::transcription::TranscriptionConfig;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -47,7 +53,7 @@ impl Default for Settings {
             ollama_url: Some("http://localhost:11434".to_string()),
             ollama_model: Some("llama3.2".to_string()),
             auto_detect_meetings: false,
-            whisper_model: "base".to_string(),
+            whisper_model: "small".to_string(),
             language: "en".to_string(),
             asr_backend: "whisper".to_string(),
         }
@@ -75,6 +81,17 @@ pub struct AudioDeviceInfo {
     pub is_default: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MeetingWithTranscript {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub ended_at: Option<String>,
+    pub pinned: bool,
+    pub duration_ms: i64,
+    pub segments: Vec<TranscriptSegment>,
+}
+
 // ============================================================================
 // App State
 // ============================================================================
@@ -85,18 +102,8 @@ pub struct AppState {
     pub transcript: Arc<Mutex<Vec<TranscriptSegment>>>,
     pub is_recording: Arc<Mutex<bool>>,
     pub settings: Arc<Mutex<Settings>>,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            audio_capture: Arc::new(Mutex::new(None)),
-            transcription_engine: Arc::new(Mutex::new(None)),
-            transcript: Arc::new(Mutex::new(Vec::new())),
-            is_recording: Arc::new(Mutex::new(false)),
-            settings: Arc::new(Mutex::new(Settings::default())),
-        }
-    }
+    pub db: Arc<Database>,
+    pub active_meeting_id: Arc<Mutex<Option<String>>>,
 }
 
 // ============================================================================
@@ -111,12 +118,18 @@ fn format_time(ms: u64) -> String {
     format!("{:02}:{:02}", mins, secs)
 }
 
+/// Format meeting title from current time
+fn format_meeting_title() -> String {
+    let now = Utc::now();
+    now.format("%a %d/%m/%y \u{00b7} %l:%M %p").to_string().trim().to_string()
+}
+
 /// Start audio recording and transcription
 #[tauri::command]
 pub async fn start_recording(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let mut is_recording = state.is_recording.lock().await;
     if *is_recording {
         return Err("Already recording".to_string());
@@ -137,6 +150,16 @@ pub async fn start_recording(
     audio_capture.start()
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
+    // Create meeting in DB
+    let meeting_id = format!("meeting-{}", Utc::now().timestamp_millis());
+    let title = format_meeting_title();
+    let created_at = Utc::now().to_rfc3339();
+
+    state.db.create_meeting(&meeting_id, &title, &created_at)
+        .map_err(|e| format!("Failed to create meeting: {}", e))?;
+
+    *state.active_meeting_id.lock().await = Some(meeting_id.clone());
+
     // Store in state
     *state.audio_capture.lock().await = Some(audio_capture);
     *state.transcript.lock().await = Vec::new();
@@ -147,6 +170,8 @@ pub async fn start_recording(
     let engine_arc = state.transcription_engine.clone();
     let is_recording_arc = state.is_recording.clone();
     let transcript_arc = state.transcript.clone();
+    let db_arc = state.db.clone();
+    let mid = meeting_id.clone();
     let app_clone = app.clone();
 
     tauri::async_runtime::spawn(async move {
@@ -157,11 +182,13 @@ pub async fn start_recording(
             is_recording_arc,
             transcript_arc,
             TranscriptionConfig::default(),
+            db_arc,
+            mid,
         ).await;
     });
 
-    log::info!("Recording started with transcription");
-    Ok(())
+    log::info!("Recording started with meeting {}", meeting_id);
+    Ok(meeting_id)
 }
 
 /// Transcription loop that also stores segments
@@ -172,6 +199,8 @@ async fn run_transcription_loop_with_storage(
     is_recording: Arc<Mutex<bool>>,
     transcript: Arc<Mutex<Vec<TranscriptSegment>>>,
     config: TranscriptionConfig,
+    db: Arc<Database>,
+    meeting_id: String,
 ) {
     use crate::asr::resample_to_16khz;
     use crate::transcription::TranscriptionEvent;
@@ -245,8 +274,11 @@ async fn run_transcription_loop_with_storage(
                             if !text.is_empty() {
                                 segment_counter += 1;
 
+                                let seg_id = format!("seg-{}", segment_counter);
+                                let time_label = format_time(total_duration_ms as u64);
+
                                 let event = TranscriptionEvent {
-                                    id: format!("seg-{}", segment_counter),
+                                    id: seg_id.clone(),
                                     text: text.to_string(),
                                     start_ms: total_duration_ms,
                                     end_ms: total_duration_ms + duration_ms,
@@ -258,10 +290,21 @@ async fn run_transcription_loop_with_storage(
                                     let mut transcript_guard = transcript.lock().await;
                                     transcript_guard.push(TranscriptSegment {
                                         id: event.id.clone(),
-                                        time: format_time(total_duration_ms as u64),
+                                        time: time_label.clone(),
                                         text: event.text.clone(),
                                         timestamp_ms: total_duration_ms as u64,
                                     });
+                                }
+
+                                // Persist segment to DB
+                                if let Err(e) = db.insert_segment(&SegmentRow {
+                                    id: seg_id,
+                                    meeting_id: meeting_id.clone(),
+                                    time_label,
+                                    text: text.to_string(),
+                                    timestamp_ms: total_duration_ms,
+                                }) {
+                                    log::error!("Failed to persist segment: {}", e);
                                 }
 
                                 total_duration_ms += duration_ms;
@@ -328,6 +371,17 @@ pub async fn stop_recording(
     *capture_guard = None;
 
     let transcript = state.transcript.lock().await.clone();
+
+    // Update meeting ended_at and duration
+    let meeting_id = state.active_meeting_id.lock().await.clone();
+    if let Some(mid) = &meeting_id {
+        let ended_at = Utc::now().to_rfc3339();
+        let duration_ms = transcript.last().map(|s| s.timestamp_ms as i64).unwrap_or(0);
+        if let Err(e) = state.db.update_meeting_ended(mid, &ended_at, duration_ms) {
+            log::error!("Failed to update meeting ended: {}", e);
+        }
+    }
+
     log::info!("Recording stopped, {} segments", transcript.len());
 
     Ok(transcript)
@@ -340,6 +394,127 @@ pub async fn get_transcript(
 ) -> Result<Vec<TranscriptSegment>, String> {
     let transcript = state.transcript.lock().await.clone();
     Ok(transcript)
+}
+
+// ============================================================================
+// Meeting Commands
+// ============================================================================
+
+#[tauri::command]
+pub async fn list_meetings(
+    state: State<'_, AppState>,
+) -> Result<Vec<MeetingListItem>, String> {
+    state.db.list_meetings().map_err(|e| format!("DB error: {}", e))
+}
+
+#[tauri::command]
+pub async fn get_meeting(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<MeetingWithTranscript, String> {
+    let meeting = state.db.get_meeting(&id)
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Meeting not found".to_string())?;
+
+    let segments = state.db.get_segments(&id)
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let transcript_segments: Vec<TranscriptSegment> = segments
+        .into_iter()
+        .map(|s| TranscriptSegment {
+            id: s.id,
+            time: s.time_label,
+            text: s.text,
+            timestamp_ms: s.timestamp_ms as u64,
+        })
+        .collect();
+
+    Ok(MeetingWithTranscript {
+        id: meeting.id,
+        title: meeting.title,
+        created_at: meeting.created_at,
+        ended_at: meeting.ended_at,
+        pinned: meeting.pinned,
+        duration_ms: meeting.duration_ms,
+        segments: transcript_segments,
+    })
+}
+
+#[tauri::command]
+pub async fn rename_meeting(
+    id: String,
+    title: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.update_meeting_title(&id, &title)
+        .map_err(|e| format!("DB error: {}", e))
+}
+
+#[tauri::command]
+pub async fn toggle_pin_meeting(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let meeting = state.db.get_meeting(&id)
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Meeting not found".to_string())?;
+    state.db.set_meeting_pinned(&id, !meeting.pinned)
+        .map_err(|e| format!("DB error: {}", e))
+}
+
+#[tauri::command]
+pub async fn delete_meeting(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.delete_meeting(&id)
+        .map_err(|e| format!("DB error: {}", e))
+}
+
+#[tauri::command]
+pub async fn search_meetings(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SearchResult>, String> {
+    if query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    state.db.search_transcripts(&query, 50)
+        .map_err(|e| format!("Search error: {}", e))
+}
+
+#[tauri::command]
+pub async fn export_meeting(
+    id: String,
+    format: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let meeting = state.db.get_meeting(&id)
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Meeting not found".to_string())?;
+
+    let segments = state.db.get_segments(&id)
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    match format.as_str() {
+        "markdown" => {
+            let mut md = format!("# {}\n\n", meeting.title);
+            md.push_str(&format!("**Date:** {}\n\n", meeting.created_at));
+            md.push_str("## Transcript\n\n");
+            for seg in &segments {
+                md.push_str(&format!("**[{}]** {}\n\n", seg.time_label, seg.text));
+            }
+            Ok(md)
+        }
+        _ => {
+            // Default: plain text
+            let mut txt = format!("{}\n{}\n\n", meeting.title, meeting.created_at);
+            for seg in &segments {
+                txt.push_str(&format!("[{}] {}\n", seg.time_label, seg.text));
+            }
+            Ok(txt)
+        }
+    }
 }
 
 // ============================================================================
@@ -441,7 +616,6 @@ pub async fn generate_summary(
         .map_err(|e| format!("LLM error: {}", e))?;
 
     // Parse the summary into structured format
-    // The LLM returns free-form text, so we'll put it in overview and extract what we can
     let lines: Vec<&str> = summary_text.lines().collect();
     let mut overview = String::new();
     let mut action_items = Vec::new();
@@ -458,7 +632,7 @@ pub async fn generate_summary(
             continue;
         }
 
-        let trimmed = line.trim().trim_start_matches(&['-', '*', '•', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')'][..]).trim();
+        let trimmed = line.trim().trim_start_matches(&['-', '*', '\u{2022}', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')'][..]).trim();
         if trimmed.is_empty() {
             continue;
         }
@@ -500,14 +674,20 @@ pub async fn get_settings(
     Ok(settings)
 }
 
-/// Save settings
+/// Save settings (also persists to DB)
 #[tauri::command]
 pub async fn save_settings(
     settings: Settings,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // Persist to DB
+    let json = serde_json::to_string(&settings)
+        .map_err(|e| format!("Serialize error: {}", e))?;
+    state.db.save_settings_json(&json)
+        .map_err(|e| format!("DB error: {}", e))?;
+
     *state.settings.lock().await = settings;
-    log::info!("Settings saved");
+    log::info!("Settings saved to DB");
     Ok(())
 }
 
@@ -518,7 +698,7 @@ pub async fn save_settings(
 /// Check if required ML models are downloaded
 #[tauri::command]
 pub async fn check_model_status() -> Result<ModelStatus, String> {
-    let model = WhisperModel::Base;
+    let model = WhisperModel::Small;
     let downloaded = asr::is_model_downloaded(model)
         .map_err(|e| format!("Failed to check model: {}", e))?;
 
@@ -527,7 +707,7 @@ pub async fn check_model_status() -> Result<ModelStatus, String> {
 
     Ok(ModelStatus {
         whisper_downloaded: downloaded,
-        whisper_model: "base".to_string(),
+        whisper_model: "small".to_string(),
         whisper_size_mb: model.size_mb(),
         models_dir: models_dir.to_string_lossy().to_string(),
     })
@@ -540,49 +720,113 @@ pub async fn get_models_info() -> Result<Vec<ModelInfo>, String> {
         .map_err(|e| format!("Failed to get models info: {}", e))
 }
 
-/// Download a specific model
+/// Download a specific model (Whisper or Parakeet)
 #[tauri::command]
 pub async fn download_model(
     app: AppHandle,
     model_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let model: WhisperModel = model_name.parse()
-        .map_err(|e: anyhow::Error| e.to_string())?;
-
-    // Download the model
-    let model_path = models::download_model(&app, model)
-        .await
-        .map_err(|e| format!("Download failed: {}", e))?;
-
-    // Get language from settings
     let language = {
         let settings = state.settings.lock().await;
         settings.language.clone()
     };
 
-    // Load the model into the transcription engine
+    // Parakeet models (requires `parakeet` feature)
+    #[cfg(feature = "parakeet")]
+    if model_name.starts_with("parakeet-") {
+        let parakeet_name = model_name.trim_start_matches("parakeet-");
+        let model: ParakeetModel = parakeet_name.parse()
+            .map_err(|e: anyhow::Error| e.to_string())?;
+
+        if !model.is_ctc() {
+            return Err("Only CTC Parakeet models are currently supported".to_string());
+        }
+
+        let model_path = models::download_parakeet_model(&app, model)
+            .await
+            .map_err(|e| format!("Download failed: {}", e))?;
+
+        let mut engine = TranscriptionEngine::with_backend(AsrBackendType::Parakeet)
+            .map_err(|e| e.to_string())?;
+        engine.set_language(&language);
+        engine.load_model(&model_path)
+            .map_err(|e| format!("Failed to load model: {}", e))?;
+
+        *state.transcription_engine.lock().await = Some(engine);
+        log::info!("Parakeet model {} loaded and ready", model_name);
+        return Ok(());
+    }
+
+    #[cfg(not(feature = "parakeet"))]
+    if model_name.starts_with("parakeet-") {
+        return Err("Parakeet backend is not available. Rebuild with --features parakeet to enable it.".to_string());
+    }
+
+    // Whisper models (default)
+    let model: WhisperModel = model_name.parse()
+        .map_err(|e: anyhow::Error| e.to_string())?;
+
+    let model_path = models::download_model(&app, model)
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
     let mut engine = TranscriptionEngine::new();
     engine.set_language(&language);
     engine.load_model(&model_path)
         .map_err(|e| format!("Failed to load model: {}", e))?;
 
     *state.transcription_engine.lock().await = Some(engine);
-
-    log::info!("Model {} loaded and ready with language '{}'", model_name, language);
+    log::info!("Whisper model {} loaded and ready with language '{}'", model_name, language);
     Ok(())
 }
 
-/// Load an already-downloaded model into memory
+/// Load an already-downloaded model into memory (Whisper or Parakeet)
 #[tauri::command]
 pub async fn load_model(
     model_name: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let language = {
+        let settings = state.settings.lock().await;
+        settings.language.clone()
+    };
+
+    // Parakeet models (requires `parakeet` feature)
+    #[cfg(feature = "parakeet")]
+    if model_name.starts_with("parakeet-") {
+        let parakeet_name = model_name.trim_start_matches("parakeet-");
+        let model: ParakeetModel = parakeet_name.parse()
+            .map_err(|e: anyhow::Error| e.to_string())?;
+
+        let model_path = crate::asr::parakeet_backend::get_parakeet_model_path(model)
+            .map_err(|e| format!("Failed to get model path: {}", e))?;
+
+        if !model_path.exists() {
+            return Err(format!("Parakeet model {} is not downloaded", model_name));
+        }
+
+        log::info!("Loading Parakeet model {} from {:?}", model_name, model_path);
+        let mut engine = TranscriptionEngine::with_backend(AsrBackendType::Parakeet)
+            .map_err(|e| e.to_string())?;
+        engine.set_language(&language);
+        engine.load_model(&model_path)
+            .map_err(|e| format!("Failed to load model: {}", e))?;
+
+        *state.transcription_engine.lock().await = Some(engine);
+        log::info!("Parakeet model {} loaded and ready", model_name);
+        return Ok(());
+    }
+
+    #[cfg(not(feature = "parakeet"))]
+    if model_name.starts_with("parakeet-") {
+        return Err("Parakeet backend is not available. Rebuild with --features parakeet to enable it.".to_string());
+    }
+
+    // Whisper models (default)
     let model: WhisperModel = model_name.parse()
         .map_err(|e: anyhow::Error| e.to_string())?;
 
-    // Check if model is downloaded
     let model_path = asr::get_model_path(model)
         .map_err(|e| format!("Failed to get model path: {}", e))?;
 
@@ -590,13 +834,6 @@ pub async fn load_model(
         return Err(format!("Model {} is not downloaded", model_name));
     }
 
-    // Get language from settings
-    let language = {
-        let settings = state.settings.lock().await;
-        settings.language.clone()
-    };
-
-    // Load the model (always reload to apply new language settings)
     log::info!("Loading model {} with language '{}' from {:?}", model_name, language, model_path);
     let mut engine = TranscriptionEngine::new();
     engine.set_language(&language);
@@ -604,7 +841,6 @@ pub async fn load_model(
         .map_err(|e| format!("Failed to load model: {}", e))?;
 
     *state.transcription_engine.lock().await = Some(engine);
-
     log::info!("Model {} loaded and ready with language '{}'", model_name, language);
     Ok(())
 }

@@ -24,11 +24,19 @@ tokio = { version = "1", features = ["full", "sync"] }
 # Database
 rusqlite = { version = "0.31", features = ["bundled"] }
 
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
 # Audio capture
 cpal = "0.15"
 
 # Speech recognition (Whisper)
 whisper-rs = "0.12"
+
+# Parakeet ASR (optional — heavy ONNX Runtime dependency)
+ort = { version = "2.0.0-rc.11", features = ["download-binaries"], optional = true }
+ndarray = { version = "0.16", optional = true }
+rustfft = { version = "6.2", optional = true }
 
 # Audio processing
 hound = "3.5"  # WAV file handling
@@ -61,6 +69,10 @@ async-trait = "0.1"
 
 # Progress tracking
 indicatif = "0.17"
+
+[features]
+default = []
+parakeet = ["ort", "ndarray", "rustfft"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

@@ -15,6 +15,34 @@ export interface Meeting {
   transcript: TranscriptSegment[];
 }
 
+export interface MeetingListItem {
+  id: string;
+  title: string;
+  created_at: string;
+  pinned: boolean;
+  segment_count: number;
+  duration_ms: number;
+}
+
+export interface MeetingWithTranscript {
+  id: string;
+  title: string;
+  created_at: string;
+  ended_at: string | null;
+  pinned: boolean;
+  duration_ms: number;
+  segments: TranscriptSegment[];
+}
+
+export interface SearchResult {
+  meeting_id: string;
+  meeting_title: string;
+  segment_id: string;
+  text: string;
+  time_label: string;
+  snippet: string;
+}
+
 export interface Settings {
   llm_provider: string;
   openai_api_key: string | null;
@@ -31,6 +59,8 @@ export interface ModelInfo {
   size_mb: number;
   downloaded: boolean;
   description: string;
+  backend: string;
+  recommended: boolean;
 }
 
 export interface BackendInfo {
