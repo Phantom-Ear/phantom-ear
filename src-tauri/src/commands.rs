@@ -101,6 +101,7 @@ pub struct AppState {
     pub transcription_engine: Arc<Mutex<Option<TranscriptionEngine>>>,
     pub transcript: Arc<Mutex<Vec<TranscriptSegment>>>,
     pub is_recording: Arc<Mutex<bool>>,
+    pub is_paused: Arc<Mutex<bool>>,
     pub settings: Arc<Mutex<Settings>>,
     pub db: Arc<Database>,
     pub active_meeting_id: Arc<Mutex<Option<String>>>,
@@ -163,12 +164,14 @@ pub async fn start_recording(
     // Store in state
     *state.audio_capture.lock().await = Some(audio_capture);
     *state.transcript.lock().await = Vec::new();
+    *state.is_paused.lock().await = false;
     *is_recording = true;
 
     // Start transcription loop in background
     let audio_capture_arc = state.audio_capture.clone();
     let engine_arc = state.transcription_engine.clone();
     let is_recording_arc = state.is_recording.clone();
+    let is_paused_arc = state.is_paused.clone();
     let transcript_arc = state.transcript.clone();
     let db_arc = state.db.clone();
     let mid = meeting_id.clone();
@@ -180,6 +183,7 @@ pub async fn start_recording(
             audio_capture_arc,
             engine_arc,
             is_recording_arc,
+            is_paused_arc,
             transcript_arc,
             TranscriptionConfig::default(),
             db_arc,
@@ -197,6 +201,7 @@ async fn run_transcription_loop_with_storage(
     audio_capture: Arc<Mutex<Option<AudioCapture>>>,
     engine: Arc<Mutex<Option<TranscriptionEngine>>>,
     is_recording: Arc<Mutex<bool>>,
+    is_paused: Arc<Mutex<bool>>,
     transcript: Arc<Mutex<Vec<TranscriptSegment>>>,
     config: TranscriptionConfig,
     db: Arc<Database>,
@@ -219,6 +224,22 @@ async fn run_transcription_loop_with_storage(
             let recording = is_recording.lock().await;
             if !*recording {
                 break;
+            }
+        }
+
+        // Check if paused - skip processing but keep loop alive
+        {
+            let paused = is_paused.lock().await;
+            if *paused {
+                // Drain audio buffer to prevent buildup
+                let capture_guard = audio_capture.lock().await;
+                if let Some(ref capture) = *capture_guard {
+                    let _ = capture.get_samples();
+                }
+                drop(capture_guard);
+                accumulated_samples.clear();
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                continue;
             }
         }
 
@@ -387,6 +408,34 @@ pub async fn stop_recording(
     Ok(transcript)
 }
 
+/// Pause recording (stops transcription but keeps session active)
+#[tauri::command]
+pub async fn pause_recording(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let is_recording = state.is_recording.lock().await;
+    if !*is_recording {
+        return Err("Not recording".to_string());
+    }
+    *state.is_paused.lock().await = true;
+    log::info!("Recording paused");
+    Ok(())
+}
+
+/// Resume recording after pause
+#[tauri::command]
+pub async fn resume_recording(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let is_recording = state.is_recording.lock().await;
+    if !*is_recording {
+        return Err("Not recording".to_string());
+    }
+    *state.is_paused.lock().await = false;
+    log::info!("Recording resumed");
+    Ok(())
+}
+
 /// Get current transcript segments
 #[tauri::command]
 pub async fn get_transcript(
@@ -525,20 +574,30 @@ pub async fn export_meeting(
 #[tauri::command]
 pub async fn ask_question(
     question: String,
+    meeting_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let transcript = state.transcript.lock().await;
-
-    if transcript.is_empty() {
-        return Err("No transcript available".to_string());
-    }
-
-    // Build context from transcript
-    let context: String = transcript
-        .iter()
-        .map(|s| format!("[{}] {}", s.time, s.text))
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Build context: from DB if meeting_id provided, otherwise from live transcript
+    let context: String = if let Some(ref mid) = meeting_id {
+        let segments = state.db.get_segments(mid)
+            .map_err(|e| format!("DB error: {}", e))?;
+        if segments.is_empty() {
+            return Err("No transcript available for this meeting".to_string());
+        }
+        segments.iter()
+            .map(|s| format!("[{}] {}", s.time_label, s.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        let transcript = state.transcript.lock().await;
+        if transcript.is_empty() {
+            return Err("No transcript available".to_string());
+        }
+        transcript.iter()
+            .map(|s| format!("[{}] {}", s.time, s.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
     // Get settings and create LLM client
     let settings = state.settings.lock().await;
@@ -572,20 +631,30 @@ pub async fn ask_question(
 /// Generate meeting summary using LLM
 #[tauri::command]
 pub async fn generate_summary(
+    meeting_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Summary, String> {
-    let transcript = state.transcript.lock().await;
-
-    if transcript.is_empty() {
-        return Err("No transcript available".to_string());
-    }
-
-    // Build transcript text
-    let transcript_text: String = transcript
-        .iter()
-        .map(|s| format!("[{}] {}", s.time, s.text))
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Build transcript text: from DB if meeting_id provided, otherwise from live transcript
+    let transcript_text: String = if let Some(ref mid) = meeting_id {
+        let segments = state.db.get_segments(mid)
+            .map_err(|e| format!("DB error: {}", e))?;
+        if segments.is_empty() {
+            return Err("No transcript available for this meeting".to_string());
+        }
+        segments.iter()
+            .map(|s| format!("[{}] {}", s.time_label, s.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        let transcript = state.transcript.lock().await;
+        if transcript.is_empty() {
+            return Err("No transcript available".to_string());
+        }
+        transcript.iter()
+            .map(|s| format!("[{}] {}", s.time, s.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
     // Get settings and create LLM client
     let settings = state.settings.lock().await;

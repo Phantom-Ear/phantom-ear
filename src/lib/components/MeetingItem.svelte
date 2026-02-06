@@ -77,7 +77,14 @@
           class="w-full bg-sidecar-bg border border-sidecar-accent rounded px-2 py-0.5 text-sm text-sidecar-text focus:outline-none"
         />
       {:else}
-        <span class="block truncate text-sm text-sidecar-text">{meeting.title}</span>
+        <div class="flex items-center gap-1.5 min-w-0">
+          {#if meeting.pinned}
+            <svg class="w-3.5 h-3.5 shrink-0 text-sidecar-accent" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+            </svg>
+          {/if}
+          <span class="block truncate text-sm text-sidecar-text">{meeting.title}</span>
+        </div>
         {#if meeting.segment_count > 0}
           <span class="text-xs text-sidecar-text-muted">{meeting.segment_count} segments</span>
         {/if}
@@ -86,18 +93,6 @@
 
     <!-- Actions -->
     <div class="flex items-center gap-1 transition-opacity {showMenu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}">
-      {#if meeting.pinned}
-        <button
-          onclick={(e) => { e.stopPropagation(); onTogglePin(); }}
-          class="p-1 rounded hover:bg-sidecar-surface-hover text-sidecar-warning"
-          title="Unpin"
-        >
-          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M16 4l2 2l-9 9l-4-4l9-9zm2.1-.1l1.8 1.8l-1.2 1.2l-1.8-1.8l1.2-1.2zM5 17v2h2v-2H5z"/>
-          </svg>
-        </button>
-      {/if}
-
       <div class="relative">
         <button
           onclick={(e) => { e.stopPropagation(); showMenu = !showMenu; }}

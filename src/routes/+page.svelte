@@ -24,6 +24,9 @@
   let recordingDuration = $state(0);
   let transcript = $state<TranscriptSegment[]>([]);
 
+  // Pause state
+  let isPaused = $state(false);
+
   // Q&A state
   let question = $state("");
   let isAsking = $state(false);
@@ -152,11 +155,7 @@
       meetingsStore.addLocalSegment(segment);
 
       // Auto-scroll to bottom
-      requestAnimationFrame(() => {
-        if (transcriptContainer) {
-          transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
-        }
-      });
+      scrollTranscriptToBottom();
     });
   }
 
@@ -182,6 +181,7 @@
     if (isRecording) {
       // Stop recording
       isRecording = false;
+      isPaused = false;
 
       // Stop the timer
       if (timerInterval) {
@@ -236,19 +236,35 @@
     }
   }
 
+  async function togglePause() {
+    if (!isRecording) return;
+    try {
+      if (isPaused) {
+        await invoke("resume_recording");
+        isPaused = false;
+      } else {
+        await invoke("pause_recording");
+        isPaused = true;
+      }
+    } catch (e) {
+      console.error("Failed to toggle pause:", e);
+    }
+  }
+
   async function askQuestion() {
     if (!question.trim() || isAsking) return;
     isAsking = true;
     answer = "";
 
     try {
-      answer = await invoke<string>("ask_question", { question });
+      answer = await invoke<string>("ask_question", { question, meetingId: isRecording ? null : meetingsStore.activeMeetingId });
     } catch (e) {
       answer = `Error: ${e}`;
     }
 
     isAsking = false;
     question = "";
+    scrollTranscriptToBottom();
   }
 
   async function generateSummary() {
@@ -257,23 +273,33 @@
     summary = null;
 
     try {
-      summary = await invoke<Summary>("generate_summary");
+      summary = await invoke<Summary>("generate_summary", { meetingId: isRecording ? null : meetingsStore.activeMeetingId });
     } catch (e) {
       // Show error in answer field as fallback
       answer = `Summary Error: ${e}`;
     }
 
     isGeneratingSummary = false;
+    scrollTranscriptToBottom();
   }
 
   function handleNavigate(view: View) {
     currentView = view;
   }
 
+  function scrollTranscriptToBottom() {
+    requestAnimationFrame(() => {
+      if (transcriptContainer) {
+        transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+      }
+    });
+  }
+
   async function handleSelectMeeting(id: string) {
     await meetingsStore.selectMeeting(id);
     transcript = meetingsStore.activeTranscript;
     currentView = 'home';
+    scrollTranscriptToBottom();
   }
 
   async function handleLanguageChange(lang: string) {
@@ -285,6 +311,17 @@
       await invoke("load_model", { modelName: currentModel });
     } catch (e) {
       console.error("Failed to save language:", e);
+    }
+  }
+
+  async function handleLlmChange(provider: string) {
+    llmProvider = provider;
+    try {
+      const settings = await invoke<SettingsType>("get_settings");
+      settings.llm_provider = provider;
+      await invoke("save_settings", { settings });
+    } catch (e) {
+      console.error("Failed to save LLM provider:", e);
     }
   }
 
@@ -425,47 +462,37 @@
         onLanguageChange={handleLanguageChange}
         onModelChange={handleModelChange}
         onDownloadModel={handleDownloadModel}
+        onLlmChange={handleLlmChange}
+        {isRecording}
+        {recordingDuration}
+        {isPaused}
+        onToggleRecording={toggleRecording}
+        onTogglePause={togglePause}
       />
 
       <!-- Content Area -->
       <div class="flex-1 flex flex-col overflow-hidden">
         {#if currentView === 'home'}
           <div class="flex-1 flex flex-col p-6 overflow-hidden">
-            <!-- Recording Control -->
-            <div class="flex flex-col items-center justify-center py-6">
-              <div class="relative">
-                <!-- Outer ring pulse when recording -->
-                {#if isRecording}
-                  <div class="absolute inset-0 rounded-full bg-sidecar-danger/30 animate-ring-pulse"></div>
-                  <div class="absolute inset-0 rounded-full bg-sidecar-danger/20 animate-ring-pulse" style="animation-delay: 0.5s"></div>
-                {/if}
-
-                <button
-                  onclick={toggleRecording}
-                  class="relative w-20 h-20 rounded-full transition-all duration-300 btn-shine {isRecording
-                    ? 'bg-gradient-danger animate-recording-glow'
-                    : 'bg-gradient-accent animate-idle-glow hover:scale-105'}"
-                >
-                  {#if isRecording}
-                    <svg class="w-7 h-7 mx-auto text-white relative z-10" fill="currentColor" viewBox="0 0 24 24">
-                      <rect x="6" y="6" width="12" height="12" rx="2" />
-                    </svg>
-                  {:else}
+            <!-- Recording Control (only show big button when NOT recording) -->
+            {#if !isRecording}
+              <div class="flex flex-col items-center justify-center py-6">
+                <div class="relative">
+                  <button
+                    onclick={toggleRecording}
+                    class="relative w-20 h-20 rounded-full transition-all duration-300 btn-shine bg-gradient-accent animate-idle-glow hover:scale-105"
+                  >
                     <svg class="w-7 h-7 mx-auto text-white" fill="currentColor" viewBox="0 0 24 24">
                       <circle cx="12" cy="12" r="6" />
                     </svg>
-                  {/if}
-                </button>
-              </div>
+                  </button>
+                </div>
 
-              <p class="mt-3 text-sm text-sidecar-text-muted">
-                {#if isRecording}
-                  Recording <span class="font-mono text-sidecar-danger font-semibold">{formatDuration(recordingDuration)}</span>
-                {:else}
+                <p class="mt-3 text-sm text-sidecar-text-muted">
                   Click to start recording
-                {/if}
-              </p>
-            </div>
+                </p>
+              </div>
+            {/if}
 
             <!-- Transcript + AI Results Area -->
             <div class="flex-1 flex flex-col min-h-0">
