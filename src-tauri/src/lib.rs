@@ -28,6 +28,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
+            commands::pause_recording,
+            commands::resume_recording,
             commands::ask_question,
             commands::get_transcript,
             commands::generate_summary,
@@ -88,6 +90,7 @@ pub fn run() {
                 transcription_engine: Arc::new(Mutex::new(None)),
                 transcript: Arc::new(Mutex::new(Vec::new())),
                 is_recording: Arc::new(Mutex::new(false)),
+                is_paused: Arc::new(Mutex::new(false)),
                 settings: Arc::new(Mutex::new(settings)),
                 db,
                 active_meeting_id: Arc::new(Mutex::new(None)),
