@@ -51,6 +51,13 @@ pub fn run() {
             commands::delete_meeting,
             commands::search_meetings,
             commands::export_meeting,
+            // Embedding commands
+            commands::download_embedding_model_cmd,
+            commands::load_embedding_model,
+            commands::semantic_search,
+            commands::embed_meeting,
+            commands::get_embedding_status,
+            commands::is_embedding_model_downloaded,
         ])
         .setup(|app| {
             // Get app data directory and create DB synchronously
@@ -94,6 +101,7 @@ pub fn run() {
                 settings: Arc::new(Mutex::new(settings)),
                 db,
                 active_meeting_id: Arc::new(Mutex::new(None)),
+                embedding_model: Arc::new(Mutex::new(None)),
             };
 
             app.manage(state);

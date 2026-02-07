@@ -6,8 +6,9 @@
   import Settings from "$lib/components/Settings.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
+  import ReferenceCard from "$lib/components/ReferenceCard.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
-  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary } from "$lib/types";
+  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult } from "$lib/types";
 
   interface DownloadProgress {
     model_name: string;
@@ -50,6 +51,18 @@
   let models = $state<ModelInfo[]>([]);
   let llmProvider = $state("ollama");
   let llmModelName = $state("");
+
+  // Genie state
+  let genieQuestion = $state("");
+  let genieAnswer = $state("");
+  let genieIsAsking = $state(false);
+  let genieReferences = $state<SemanticSearchResult[]>([]);
+  let genieContextLimit = $state(10);
+  let genieHistory = $state<Array<{ role: 'user' | 'assistant'; text: string; refs?: SemanticSearchResult[] }>>([]);
+
+  // Embedding state
+  let embeddingModelLoaded = $state(false);
+  let embeddingDownloading = $state(false);
 
   // Export state
   let exportCopied = $state(false);
@@ -108,6 +121,9 @@
           console.error("Failed to load model:", e);
         }
       }
+
+      // Auto-load or download embedding model
+      initEmbeddingModel();
     } catch (e) {
       console.error("Failed to check model status:", e);
       needsSetup = true;
@@ -283,6 +299,90 @@
     scrollTranscriptToBottom();
   }
 
+  async function initEmbeddingModel() {
+    try {
+      const downloaded = await invoke<boolean>("is_embedding_model_downloaded");
+      if (downloaded) {
+        await invoke("load_embedding_model");
+        embeddingModelLoaded = true;
+        console.log("Embedding model loaded");
+      } else {
+        // Auto-download in background
+        embeddingDownloading = true;
+        await invoke("download_embedding_model_cmd");
+        embeddingModelLoaded = true;
+        embeddingDownloading = false;
+        console.log("Embedding model downloaded and loaded");
+      }
+    } catch (e) {
+      console.error("Embedding model init failed:", e);
+      embeddingDownloading = false;
+    }
+  }
+
+  async function askGenie() {
+    if (!genieQuestion.trim() || genieIsAsking) return;
+    const q = genieQuestion.trim();
+    genieQuestion = "";
+    genieIsAsking = true;
+    genieAnswer = "";
+    genieReferences = [];
+    genieContextLimit = 10;
+
+    genieHistory = [...genieHistory, { role: 'user', text: q }];
+
+    try {
+      // Semantic search across all meetings
+      const refs = await meetingsStore.semanticSearch(q, undefined, 10);
+      genieReferences = refs;
+
+      // Use LLM to answer with context
+      const ans = await invoke<string>("ask_question", {
+        question: q,
+        meetingId: null,
+        contextLimit: 10,
+      });
+      genieAnswer = ans;
+      genieHistory = [...genieHistory, { role: 'assistant', text: ans, refs }];
+    } catch (e) {
+      const errMsg = `Error: ${e}`;
+      genieAnswer = errMsg;
+      genieHistory = [...genieHistory, { role: 'assistant', text: errMsg }];
+    }
+    genieIsAsking = false;
+  }
+
+  async function expandGenieContext() {
+    if (genieIsAsking || genieHistory.length < 2) return;
+    // Find last user question
+    const lastUserMsg = [...genieHistory].reverse().find(h => h.role === 'user');
+    if (!lastUserMsg) return;
+
+    const newLimit = Math.min(genieContextLimit + 10, 30);
+    genieContextLimit = newLimit;
+    genieIsAsking = true;
+
+    try {
+      const refs = await meetingsStore.semanticSearch(lastUserMsg.text, undefined, newLimit);
+      genieReferences = refs;
+
+      const ans = await invoke<string>("ask_question", {
+        question: lastUserMsg.text,
+        meetingId: null,
+        contextLimit: newLimit,
+      });
+      genieAnswer = ans;
+      // Replace last assistant message
+      genieHistory = [
+        ...genieHistory.slice(0, -1),
+        { role: 'assistant', text: ans, refs },
+      ];
+    } catch (e) {
+      console.error("Expand context failed:", e);
+    }
+    genieIsAsking = false;
+  }
+
   function handleNavigate(view: View) {
     currentView = view;
   }
@@ -298,6 +398,8 @@
   async function handleSelectMeeting(id: string) {
     await meetingsStore.selectMeeting(id);
     transcript = meetingsStore.activeTranscript;
+    answer = "";
+    summary = null;
     currentView = 'home';
     scrollTranscriptToBottom();
   }
@@ -687,16 +789,123 @@
           </div>
 
         {:else if currentView === 'genie'}
-          <div class="flex-1 flex flex-col items-center justify-center p-6 text-center">
-            <div class="w-16 h-16 mb-4 rounded-2xl bg-sidecar-purple/20 flex items-center justify-center">
-              <svg class="w-8 h-8 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-              </svg>
+          <div class="flex-1 flex flex-col p-6 overflow-hidden">
+            <!-- Genie Header -->
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-10 h-10 rounded-xl bg-sidecar-purple/20 flex items-center justify-center">
+                <svg class="w-5 h-5 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+              </div>
+              <div>
+                <h2 class="text-base font-semibold text-sidecar-text">Genie</h2>
+                <p class="text-xs text-sidecar-text-muted">Search across all your meetings</p>
+              </div>
+              {#if embeddingDownloading}
+                <span class="ml-auto text-xs text-sidecar-text-muted flex items-center gap-1">
+                  <div class="w-3 h-3 border border-sidecar-accent border-t-transparent rounded-full animate-spin"></div>
+                  Loading embeddings...
+                </span>
+              {:else if !embeddingModelLoaded}
+                <span class="ml-auto text-xs text-sidecar-text-muted">Embedding model not loaded</span>
+              {/if}
             </div>
-            <h2 class="text-xl font-semibold text-sidecar-text mb-2">Genie AI Assistant</h2>
-            <p class="text-sm text-sidecar-text-muted max-w-md">
-              Coming soon! Ask Genie to summarize meetings, extract action items, and answer questions about your recorded sessions.
-            </p>
+
+            <!-- Chat History -->
+            <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-y-auto p-4 space-y-4">
+              {#if genieHistory.length === 0}
+                <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
+                  <div class="w-14 h-14 mb-4 rounded-2xl bg-sidecar-purple/10 flex items-center justify-center">
+                    <svg class="w-7 h-7 opacity-50 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                  </div>
+                  <p class="text-sm font-medium">Ask anything about your meetings</p>
+                  <p class="text-xs mt-1 opacity-70">Genie searches across all recordings to find answers</p>
+                </div>
+              {:else}
+                {#each genieHistory as msg}
+                  {#if msg.role === 'user'}
+                    <div class="flex justify-end">
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-sidecar-accent text-white text-sm">
+                        {msg.text}
+                      </div>
+                    </div>
+                  {:else}
+                    <div class="space-y-3">
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-sidecar-surface border border-sidecar-border text-sm text-sidecar-text whitespace-pre-wrap">
+                        {msg.text}
+                      </div>
+                      {#if msg.refs && msg.refs.length > 0}
+                        <div class="space-y-2 max-w-[80%]">
+                          <p class="text-xs text-sidecar-text-muted uppercase tracking-wide font-medium">References</p>
+                          {#each msg.refs.slice(0, 5) as ref}
+                            <ReferenceCard result={ref} onSelect={handleSelectMeeting} />
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
+                {/each}
+
+                {#if genieIsAsking}
+                  <div class="flex items-center gap-2 px-4 py-2 text-sidecar-text-muted text-sm">
+                    <div class="w-4 h-4 border-2 border-sidecar-purple border-t-transparent rounded-full animate-spin"></div>
+                    Searching across meetings...
+                  </div>
+                {/if}
+              {/if}
+            </div>
+
+            <!-- Expand Context Button -->
+            {#if genieHistory.length > 0 && genieContextLimit < 30 && !genieIsAsking}
+              <div class="flex justify-center mt-2">
+                <button
+                  onclick={expandGenieContext}
+                  class="px-3 py-1.5 text-xs rounded-lg bg-sidecar-surface border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-purple/40 transition-colors"
+                >
+                  Show more context ({genieContextLimit + 10} chunks)
+                </button>
+              </div>
+            {/if}
+
+            <!-- Genie Input Bar -->
+            <div class="mt-4">
+              <form
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  askGenie();
+                }}
+                class="relative flex items-center"
+              >
+                <input
+                  type="text"
+                  bind:value={genieQuestion}
+                  placeholder={embeddingModelLoaded ? "Ask Genie about any meeting..." : "Loading embedding model..."}
+                  disabled={!embeddingModelLoaded}
+                  class="w-full pl-4 pr-14 py-3.5 glass border border-sidecar-border rounded-2xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-purple/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                <div class="absolute right-2">
+                  <button
+                    type="submit"
+                    disabled={!genieQuestion.trim() || genieIsAsking || !embeddingModelLoaded}
+                    class="p-2 rounded-xl bg-sidecar-purple text-white hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
+                    title="Ask Genie"
+                  >
+                    {#if genieIsAsking}
+                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                      </svg>
+                    {:else}
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                      </svg>
+                    {/if}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
 
         {:else if currentView === 'settings'}

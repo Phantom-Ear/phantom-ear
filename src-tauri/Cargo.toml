@@ -33,9 +33,12 @@ cpal = "0.15"
 # Speech recognition (Whisper)
 whisper-rs = "0.12"
 
-# Parakeet ASR (optional — heavy ONNX Runtime dependency)
-ort = { version = "2.0.0-rc.11", features = ["download-binaries"], optional = true }
-ndarray = { version = "0.16", optional = true }
+# ONNX Runtime (used for embeddings, optionally for Parakeet ASR)
+ort = { version = "2.0.0-rc.11", features = ["download-binaries"] }
+ndarray = "0.16"
+tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
+
+# Parakeet ASR (optional — needs rustfft)
 rustfft = { version = "6.2", optional = true }
 
 # Audio processing
@@ -72,7 +75,7 @@ indicatif = "0.17"
 
 [features]
 default = []
-parakeet = ["ort", "ndarray", "rustfft"]
+parakeet = ["rustfft"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

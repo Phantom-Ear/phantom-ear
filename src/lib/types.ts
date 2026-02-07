@@ -91,5 +91,20 @@ export interface Summary {
   key_points: string[];
 }
 
+export interface SemanticSearchResult {
+  meeting_id: string;
+  meeting_title: string;
+  segment_id: string;
+  text: string;
+  time_label: string;
+  score: number;
+}
+
+export interface EmbeddingStatus {
+  model_loaded: boolean;
+  embedded_count: number;
+  total_segments: number;
+}
+
 export type View = 'home' | 'genie' | 'settings';
 export type Theme = 'light' | 'dark';
