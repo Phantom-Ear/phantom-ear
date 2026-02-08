@@ -38,11 +38,18 @@ pub async fn download_model(
     let model_path = get_model_path(model)?;
     let model_name = format!("{:?}", model);
 
-    // Check if already downloaded
+    // Check if already downloaded (with size validation)
     if model_path.exists() {
-        log::info!("Model {} already downloaded at {:?}", model_name, model_path);
-        emit_progress(app, &model_name, 0, 0, 100.0, DownloadStatus::Completed);
-        return Ok(model_path);
+        let file_size = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+        let expected_min = model.size_mb() * 1024 * 1024 * 8 / 10; // at least 80% of expected size
+        if file_size >= expected_min {
+            log::info!("Model {} already downloaded at {:?} ({} bytes)", model_name, model_path, file_size);
+            emit_progress(app, &model_name, 0, 0, 100.0, DownloadStatus::Completed);
+            return Ok(model_path);
+        } else {
+            log::warn!("Model {} exists but is too small ({} bytes, expected >= {}), re-downloading", model_name, file_size, expected_min);
+            let _ = std::fs::remove_file(&model_path);
+        }
     }
 
     log::info!("Starting download of model {} from {}", model_name, model.download_url());
@@ -95,10 +102,23 @@ pub async fn download_model(
     file.flush().await?;
     drop(file);
 
+    // Validate downloaded file size (detect proxy/firewall interception)
+    let file_size = tokio::fs::metadata(&temp_path).await.map(|m| m.len()).unwrap_or(0);
+    let expected_min = model.size_mb() * 1024 * 1024 * 8 / 10; // at least 80% of expected size
+    if file_size < expected_min {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        emit_progress(app, &model_name, 0, 0, 0.0, DownloadStatus::Failed);
+        return Err(anyhow!(
+            "Downloaded file is too small ({:.1} MB, expected ~{} MB). This may be caused by a corporate firewall or proxy blocking the download. Try downloading on a different network.",
+            file_size as f64 / (1024.0 * 1024.0),
+            model.size_mb()
+        ));
+    }
+
     // Rename temp file to final path
     tokio::fs::rename(&temp_path, &model_path).await?;
 
-    log::info!("Model {} downloaded successfully to {:?}", model_name, model_path);
+    log::info!("Model {} downloaded successfully to {:?} ({} bytes)", model_name, model_path, file_size);
     emit_progress(app, &model_name, total_size, total_size, 100.0, DownloadStatus::Completed);
 
     Ok(model_path)

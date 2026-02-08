@@ -423,7 +423,7 @@ fn default_char_vocab() -> Vec<String> {
 
 /// Get the models directory for Parakeet
 pub fn get_parakeet_models_dir() -> Result<PathBuf> {
-    let dirs = directories::ProjectDirs::from("com", "sidecar", "Sidecar")
+    let dirs = directories::ProjectDirs::from("com", "phantomear", "PhantomEar")
         .ok_or_else(|| anyhow!("Could not determine project directories"))?;
 
     let models_dir = dirs.data_dir().join("models").join("parakeet");
