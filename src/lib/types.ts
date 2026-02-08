@@ -106,5 +106,5 @@ export interface EmbeddingStatus {
   total_segments: number;
 }
 
-export type View = 'home' | 'genie' | 'settings';
+export type View = 'home' | 'phomy' | 'settings';
 export type Theme = 'light' | 'dark';

@@ -1,4 +1,4 @@
-// Sidecar - Privacy-first desktop meeting assistant
+// PhantomEar - Privacy-first desktop meeting assistant
 // Main library entry point
 
 pub mod audio;
@@ -51,6 +51,8 @@ pub fn run() {
             commands::delete_meeting,
             commands::search_meetings,
             commands::export_meeting,
+            // Phomy assistant
+            commands::phomy_ask,
             // Embedding commands
             commands::download_embedding_model_cmd,
             commands::load_embedding_model,

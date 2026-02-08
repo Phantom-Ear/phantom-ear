@@ -52,13 +52,13 @@
   let llmProvider = $state("ollama");
   let llmModelName = $state("");
 
-  // Genie state
-  let genieQuestion = $state("");
-  let genieAnswer = $state("");
-  let genieIsAsking = $state(false);
-  let genieReferences = $state<SemanticSearchResult[]>([]);
-  let genieContextLimit = $state(10);
-  let genieHistory = $state<Array<{ role: 'user' | 'assistant'; text: string; refs?: SemanticSearchResult[] }>>([]);
+  // Phomy state
+  let phomyQuestion = $state("");
+  let phomyAnswer = $state("");
+  let phomyIsAsking = $state(false);
+  let phomyReferences = $state<SemanticSearchResult[]>([]);
+  let phomyContextLimit = $state(10);
+  let phomyHistory = $state<Array<{ role: 'user' | 'assistant'; text: string; refs?: SemanticSearchResult[] }>>([]);
 
   // Embedding state
   let embeddingModelLoaded = $state(false);
@@ -66,6 +66,16 @@
 
   // Export state
   let exportCopied = $state(false);
+
+  // Splash screen state
+  let showSplash = $state(true);
+  let splashFadingOut = $state(false);
+  let splashAnimationDone = $state(false);
+
+  // Text scramble state for welcome headline
+  let scrambleOutput = $state<Array<{ char: string; scrambled: boolean }>>([]);
+  let scrambleComplete = $state(false);
+  let scrambleStarted = false;
 
   const languageNames: Record<string, string> = {
     auto: "Auto-detect",
@@ -129,7 +139,41 @@
       needsSetup = true;
     }
     isLoading = false;
+    // Wait for both loading AND animation to complete before hiding splash
+    waitForSplashEnd();
   });
+
+  // Splash: logo fly-in (0.6s) + hold (0.6s) = ~1.2s minimum
+  const SPLASH_MIN_DURATION = 1200;
+
+  // Trigger text scramble when welcome screen is visible
+  $effect(() => {
+    if (!showSplash && !isRecording && transcript.length === 0 && !scrambleStarted) {
+      runTextScramble();
+    }
+  });
+
+  // Start splash timer on mount
+  $effect(() => {
+    if (showSplash) {
+      const timeout = setTimeout(() => {
+        splashAnimationDone = true;
+      }, SPLASH_MIN_DURATION);
+      return () => clearTimeout(timeout);
+    }
+  });
+
+  function waitForSplashEnd() {
+    const check = setInterval(() => {
+      if (!isLoading && splashAnimationDone) {
+        clearInterval(check);
+        splashFadingOut = true;
+        setTimeout(() => {
+          showSplash = false;
+        }, 500);
+      }
+    }, 50);
+  }
 
   onDestroy(() => {
     if (timerInterval) {
@@ -320,67 +364,95 @@
     }
   }
 
-  async function askGenie() {
-    if (!genieQuestion.trim() || genieIsAsking) return;
-    const q = genieQuestion.trim();
-    genieQuestion = "";
-    genieIsAsking = true;
-    genieAnswer = "";
-    genieReferences = [];
-    genieContextLimit = 10;
+  async function askPhomy() {
+    if (!phomyQuestion.trim() || phomyIsAsking) return;
+    const q = phomyQuestion.trim();
+    phomyQuestion = "";
+    phomyIsAsking = true;
+    phomyAnswer = "";
+    phomyReferences = [];
+    phomyContextLimit = 10;
 
-    genieHistory = [...genieHistory, { role: 'user', text: q }];
+    phomyHistory = [...phomyHistory, { role: 'user', text: q }];
 
     try {
-      // Semantic search across all meetings
+      // Semantic search for references (display only)
       const refs = await meetingsStore.semanticSearch(q, undefined, 10);
-      genieReferences = refs;
+      phomyReferences = refs;
 
-      // Use LLM to answer with context
-      const ans = await invoke<string>("ask_question", {
-        question: q,
-        meetingId: null,
-        contextLimit: 10,
-      });
-      genieAnswer = ans;
-      genieHistory = [...genieHistory, { role: 'assistant', text: ans, refs }];
+      // Use Phomy intelligent routing
+      const ans = await invoke<string>("phomy_ask", { question: q });
+      phomyAnswer = ans;
+      phomyHistory = [...phomyHistory, { role: 'assistant', text: ans, refs }];
     } catch (e) {
       const errMsg = `Error: ${e}`;
-      genieAnswer = errMsg;
-      genieHistory = [...genieHistory, { role: 'assistant', text: errMsg }];
+      phomyAnswer = errMsg;
+      phomyHistory = [...phomyHistory, { role: 'assistant', text: errMsg }];
     }
-    genieIsAsking = false;
+    phomyIsAsking = false;
   }
 
-  async function expandGenieContext() {
-    if (genieIsAsking || genieHistory.length < 2) return;
-    // Find last user question
-    const lastUserMsg = [...genieHistory].reverse().find(h => h.role === 'user');
+  async function expandPhomyContext() {
+    if (phomyIsAsking || phomyHistory.length < 2) return;
+    const lastUserMsg = [...phomyHistory].reverse().find(h => h.role === 'user');
     if (!lastUserMsg) return;
 
-    const newLimit = Math.min(genieContextLimit + 10, 30);
-    genieContextLimit = newLimit;
-    genieIsAsking = true;
+    const newLimit = Math.min(phomyContextLimit + 10, 30);
+    phomyContextLimit = newLimit;
+    phomyIsAsking = true;
 
     try {
       const refs = await meetingsStore.semanticSearch(lastUserMsg.text, undefined, newLimit);
-      genieReferences = refs;
+      phomyReferences = refs;
 
-      const ans = await invoke<string>("ask_question", {
-        question: lastUserMsg.text,
-        meetingId: null,
-        contextLimit: newLimit,
-      });
-      genieAnswer = ans;
-      // Replace last assistant message
-      genieHistory = [
-        ...genieHistory.slice(0, -1),
+      const ans = await invoke<string>("phomy_ask", { question: lastUserMsg.text });
+      phomyAnswer = ans;
+      phomyHistory = [
+        ...phomyHistory.slice(0, -1),
         { role: 'assistant', text: ans, refs },
       ];
     } catch (e) {
       console.error("Expand context failed:", e);
     }
-    genieIsAsking = false;
+    phomyIsAsking = false;
+  }
+
+  // TextScramble - runs once on welcome screen mount
+  const SCRAMBLE_CHARS = "!<>-_\\/[]{}—=+*^?#";
+  const HEADLINE = "Always Listening. Never Seen.";
+
+  function runTextScramble() {
+    if (scrambleStarted) return;
+    scrambleStarted = true;
+
+    const finalChars = HEADLINE.split("");
+    const totalFrames = 30;
+    let frame = 0;
+
+    // Initialize with all scrambled
+    scrambleOutput = finalChars.map(c => c === " " ? { char: " ", scrambled: false } : { char: SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)], scrambled: true });
+
+    const interval = setInterval(() => {
+      frame++;
+      const progress = frame / totalFrames;
+
+      scrambleOutput = finalChars.map((c, i) => {
+        if (c === " ") return { char: " ", scrambled: false };
+        // Characters resolve left to right with some randomness
+        const charThreshold = (i / finalChars.length) * 0.8;
+        if (progress > charThreshold + 0.2) {
+          return { char: c, scrambled: false };
+        }
+        // Still scrambling
+        return { char: SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)], scrambled: true };
+      });
+
+      if (frame >= totalFrames) {
+        clearInterval(interval);
+        scrambleOutput = finalChars.map(c => ({ char: c, scrambled: false }));
+        scrambleComplete = true;
+      }
+    }, 50);
   }
 
   function handleNavigate(view: View) {
@@ -528,13 +600,23 @@
   let recentMeetings = $derived(meetingsStore.getRecentMeetings());
 </script>
 
-{#if isLoading}
-  <div class="flex items-center justify-center min-h-screen bg-sidecar-bg">
-    <div class="w-8 h-8 border-2 border-sidecar-accent border-t-transparent rounded-full animate-spin"></div>
+{#if showSplash}
+  <div class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-sidecar-bg {splashFadingOut ? 'animate-splash-fade-out' : ''}">
+    <!-- PhantomEar Logo -->
+    <div class="animate-phantom-fly">
+      <img
+        src="/PhantomEarNoBackground.png"
+        alt="PhantomEar"
+        class="w-28 h-28 object-contain opacity-90"
+      />
+    </div>
+
   </div>
-{:else if needsSetup}
+{/if}
+
+{#if !showSplash && needsSetup}
   <Setup onComplete={handleSetupComplete} />
-{:else}
+{:else if !showSplash}
   <div class="flex h-screen bg-sidecar-bg no-select">
     <!-- Sidebar -->
     <Sidebar
@@ -633,18 +715,30 @@
               {#if !transcriptCollapsed}
                 <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-hidden shadow-glow-surface transition-all duration-200">
                   {#if transcript.length === 0 && !summary && !answer}
-                    <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
-                      <div class="w-14 h-14 mb-4 rounded-2xl bg-sidecar-surface/50 flex items-center justify-center">
-                        <svg class="w-7 h-7 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                      </div>
-                      <p class="text-sm font-medium">
-                        {isRecording ? "Listening..." : "No transcript yet"}
-                      </p>
-                      <p class="text-xs mt-1 opacity-70">
-                        {isRecording ? "Speech will appear here in real-time" : "Start recording to capture audio"}
-                      </p>
+                    <div class="relative flex flex-col items-center justify-center h-full text-sidecar-text-muted overflow-hidden">
+                      <!-- Ambient PhantomEar background -->
+                      <img
+                        src="/PhantomEarNoBackground.png"
+                        alt=""
+                        aria-hidden="true"
+                        class="absolute inset-0 m-auto w-64 h-64 object-contain opacity-[0.04] blur-[1px] pointer-events-none select-none"
+                      />
+                      {#if isRecording}
+                        <p class="text-sm font-medium relative z-10">Listening...</p>
+                        <p class="text-xs mt-1 opacity-70 relative z-10">Speech will appear here in real-time</p>
+                      {:else}
+                        <!-- Scramble headline -->
+                        <p class="text-xl font-light tracking-wide relative z-10" aria-label="Always Listening. Never Seen.">
+                          {#if scrambleComplete}
+                            <span class="text-sidecar-text">{HEADLINE}</span>
+                          {:else}
+                            {#each scrambleOutput as ch}
+                              <span class={ch.scrambled ? 'text-sidecar-purple opacity-40' : 'text-sidecar-text'}>{ch.char}</span>
+                            {/each}
+                          {/if}
+                        </p>
+                        <p class="text-xs mt-3 opacity-50 relative z-10">Click record to begin</p>
+                      {/if}
                     </div>
                   {:else}
                     <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
@@ -788,22 +882,24 @@
             </div>
           </div>
 
-        {:else if currentView === 'genie'}
+        {:else if currentView === 'phomy'}
           <div class="flex-1 flex flex-col p-6 overflow-hidden">
-            <!-- Genie Header -->
+            <!-- Phomy Header -->
             <div class="flex items-center gap-3 mb-4">
               <div class="w-10 h-10 rounded-xl bg-sidecar-purple/20 flex items-center justify-center">
-                <svg class="w-5 h-5 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                <svg class="w-5 h-5 text-sidecar-purple" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                 </svg>
               </div>
               <div>
-                <h2 class="text-base font-semibold text-sidecar-text">Genie</h2>
-                <p class="text-xs text-sidecar-text-muted">Search across all your meetings</p>
+                <h2 class="text-base font-semibold text-sidecar-text">Phomy</h2>
+                <p class="text-xs text-sidecar-text-muted">Your meeting memory</p>
               </div>
               {#if embeddingDownloading}
                 <span class="ml-auto text-xs text-sidecar-text-muted flex items-center gap-1">
-                  <div class="w-3 h-3 border border-sidecar-accent border-t-transparent rounded-full animate-spin"></div>
+                  <svg class="w-3 h-3 text-sidecar-purple opacity-50 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
+                  </svg>
                   Loading embeddings...
                 </span>
               {:else if !embeddingModelLoaded}
@@ -813,18 +909,18 @@
 
             <!-- Chat History -->
             <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-y-auto p-4 space-y-4">
-              {#if genieHistory.length === 0}
+              {#if phomyHistory.length === 0}
                 <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
                   <div class="w-14 h-14 mb-4 rounded-2xl bg-sidecar-purple/10 flex items-center justify-center">
-                    <svg class="w-7 h-7 opacity-50 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    <svg class="w-7 h-7 opacity-40 text-sidecar-purple" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                     </svg>
                   </div>
-                  <p class="text-sm font-medium">Ask anything about your meetings</p>
-                  <p class="text-xs mt-1 opacity-70">Genie searches across all recordings to find answers</p>
+                  <p class="text-sm font-medium">Ask Phomy anything about your meetings.</p>
+                  <p class="text-xs mt-1 opacity-70">Recalls what was said, summarizes time ranges, and searches across all recordings.</p>
                 </div>
               {:else}
-                {#each genieHistory as msg}
+                {#each phomyHistory as msg}
                   {#if msg.role === 'user'}
                     <div class="flex justify-end">
                       <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-sidecar-accent text-white text-sm">
@@ -848,51 +944,53 @@
                   {/if}
                 {/each}
 
-                {#if genieIsAsking}
+                {#if phomyIsAsking}
                   <div class="flex items-center gap-2 px-4 py-2 text-sidecar-text-muted text-sm">
-                    <div class="w-4 h-4 border-2 border-sidecar-purple border-t-transparent rounded-full animate-spin"></div>
-                    Searching across meetings...
+                    <svg class="w-4 h-4 text-sidecar-purple animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
+                    </svg>
+                    Thinking...
                   </div>
                 {/if}
               {/if}
             </div>
 
             <!-- Expand Context Button -->
-            {#if genieHistory.length > 0 && genieContextLimit < 30 && !genieIsAsking}
+            {#if phomyHistory.length > 0 && phomyContextLimit < 30 && !phomyIsAsking}
               <div class="flex justify-center mt-2">
                 <button
-                  onclick={expandGenieContext}
+                  onclick={expandPhomyContext}
                   class="px-3 py-1.5 text-xs rounded-lg bg-sidecar-surface border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-purple/40 transition-colors"
                 >
-                  Show more context ({genieContextLimit + 10} chunks)
+                  Show more context ({phomyContextLimit + 10} chunks)
                 </button>
               </div>
             {/if}
 
-            <!-- Genie Input Bar -->
+            <!-- Phomy Input Bar -->
             <div class="mt-4">
               <form
                 onsubmit={(e) => {
                   e.preventDefault();
-                  askGenie();
+                  askPhomy();
                 }}
                 class="relative flex items-center"
               >
                 <input
                   type="text"
-                  bind:value={genieQuestion}
-                  placeholder={embeddingModelLoaded ? "Ask Genie about any meeting..." : "Loading embedding model..."}
+                  bind:value={phomyQuestion}
+                  placeholder={embeddingModelLoaded ? "Ask Phomy about your meetings..." : "Loading embedding model..."}
                   disabled={!embeddingModelLoaded}
                   class="w-full pl-4 pr-14 py-3.5 glass border border-sidecar-border rounded-2xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-purple/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <div class="absolute right-2">
                   <button
                     type="submit"
-                    disabled={!genieQuestion.trim() || genieIsAsking || !embeddingModelLoaded}
+                    disabled={!phomyQuestion.trim() || phomyIsAsking || !embeddingModelLoaded}
                     class="p-2 rounded-xl bg-sidecar-purple text-white hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
-                    title="Ask Genie"
+                    title="Ask Phomy"
                   >
-                    {#if genieIsAsking}
+                    {#if phomyIsAsking}
                       <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>

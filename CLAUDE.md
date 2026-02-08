@@ -56,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Sidecar** - A privacy-first desktop meeting assistant that provides real-time transcription, contextual Q&A, and automated summaries without joining meetings or leaking raw data.
+**PhantomEar** - A privacy-first desktop meeting assistant that provides real-time transcription, contextual Q&A, and automated summaries without joining meetings or leaking raw data.
 
 Core principles:
 - Invisible by default (no bot participants, no recording banners)
@@ -101,7 +101,7 @@ cd src-tauri && cargo check
 ## Architecture
 
 ```
-sidecar/
+phantomear/
 ├── src/                      # Svelte frontend
 │   ├── app.css               # TailwindCSS with custom theme
 │   ├── routes/+page.svelte   # Main recording UI
@@ -133,7 +133,7 @@ sidecar/
 - Resampling to 16kHz via `rubato`
 
 ### Model Download (`src-tauri/src/models/`)
-- Downloads models to `~/Library/Application Support/com.sidecar.Sidecar/models/`
+- Downloads models to `~/Library/Application Support/com.phantomear.app/models/`
 - Emits `model-download-progress` events to frontend
 
 ### Transcription (`src-tauri/src/transcription/`)
