@@ -60,10 +60,34 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS code signing (optional — set these secrets for signed builds)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'PhantomEar ${{ github.ref_name }}'
-          releaseBody: 'See the assets below to download PhantomEar for your platform.'
+          releaseBody: |
+            ## Download PhantomEar for your platform
+
+            | Platform | File |
+            |----------|------|
+            | macOS (Apple Silicon) | `.dmg` (aarch64) |
+            | macOS (Intel) | `.dmg` (x64) |
+            | Windows | `.msi` or `.exe` |
+
+            ### macOS Installation Note
+            Since PhantomEar is not yet notarized with Apple, macOS may show a **"damaged"** warning. To fix this, open Terminal and run:
+            ```
+            xattr -cr /Applications/PhantomEar.app
+            ```
+            Then open the app normally. This only needs to be done once.
+
+            ### Windows Installation Note
+            If the `.msi` installer is blocked by corporate policies, use the `.exe` installer instead.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}

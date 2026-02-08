@@ -212,7 +212,7 @@ pub fn resample_to_16khz(samples: &[f32], source_rate: u32) -> Result<Vec<f32>> 
 
 /// Get the models directory path
 pub fn get_models_dir() -> Result<PathBuf> {
-    let dirs = directories::ProjectDirs::from("com", "sidecar", "Sidecar")
+    let dirs = directories::ProjectDirs::from("com", "phantomear", "PhantomEar")
         .ok_or_else(|| anyhow!("Could not determine project directories"))?;
 
     let models_dir = dirs.data_dir().join("models");
@@ -221,10 +221,16 @@ pub fn get_models_dir() -> Result<PathBuf> {
     Ok(models_dir)
 }
 
-/// Check if a model is downloaded
+/// Check if a model is downloaded (with size validation)
 pub fn is_model_downloaded(model: WhisperModel) -> Result<bool> {
     let model_path = get_models_dir()?.join(model.filename());
-    Ok(model_path.exists())
+    if !model_path.exists() {
+        return Ok(false);
+    }
+    // Validate file size — at least 80% of expected to catch corrupt/proxy files
+    let file_size = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+    let expected_min = model.size_mb() * 1024 * 1024 * 8 / 10;
+    Ok(file_size >= expected_min)
 }
 
 /// Get the full path to a model file

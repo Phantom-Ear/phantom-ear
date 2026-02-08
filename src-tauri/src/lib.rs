@@ -67,7 +67,7 @@ pub fn run() {
                 .map_err(|e| format!("Failed to get app data dir: {}", e))?;
             std::fs::create_dir_all(&app_dir)?;
 
-            let db_path = app_dir.join("sidecar.db");
+            let db_path = app_dir.join("phantomear.db");
             log::info!("Opening database at: {:?}", db_path);
 
             let db = Database::new(&db_path)

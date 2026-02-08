@@ -125,7 +125,7 @@
           </svg>
         </div>
       </div>
-      <h1 class="text-2xl font-semibold mb-2">Welcome to Sidecar</h1>
+      <h1 class="text-2xl font-semibold mb-2">Welcome to PhantomEar</h1>
       <p class="text-sidecar-text-muted text-sm">
         Privacy-first meeting assistant with real-time transcription
       </p>
@@ -171,7 +171,7 @@
       {#if !isDownloading}
         <h2 class="text-lg font-medium mb-4">Download Speech Model</h2>
         <p class="text-sm text-sidecar-text-muted mb-6">
-          Sidecar uses a local AI model for speech recognition. All transcription happens on your device - your audio never leaves your computer.
+          PhantomEar uses a local AI model for speech recognition. All transcription happens on your device - your audio never leaves your computer.
         </p>
 
         <!-- Model Selection -->
