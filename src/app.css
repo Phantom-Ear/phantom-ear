@@ -316,3 +316,59 @@ body {
   height: 4px;
   animation: audio-bars 0.8s ease-in-out infinite;
 }
+
+/* ============================================================================
+   SPLASH SCREEN ANIMATIONS
+   ============================================================================ */
+
+/* Logo flies in from left with rotation and scale */
+@keyframes phantom-fly-in {
+  0% {
+    transform: translateX(-100vw) scale(0.3) rotate(-20deg);
+    opacity: 0;
+  }
+  60% {
+    transform: translateX(10px) scale(1.05) rotate(2deg);
+    opacity: 1;
+  }
+  80% {
+    transform: translateX(-5px) scale(0.98) rotate(-1deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.animate-phantom-fly {
+  animation: phantom-fly-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Splash fade out */
+@keyframes splash-fade-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-splash-fade-out {
+  animation: splash-fade-out 0.5s ease-out forwards;
+}
+
+/* Typewriter cursor blink */
+@keyframes cursor-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.animate-cursor-blink {
+  animation: cursor-blink 0.6s step-end infinite;
+}

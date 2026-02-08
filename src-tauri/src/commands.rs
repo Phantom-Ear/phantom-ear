@@ -448,6 +448,53 @@ pub async fn stop_recording(
 
     log::info!("Recording stopped, {} segments", transcript.len());
 
+    // Auto-generate summary in background (non-blocking)
+    if transcript.len() > 0 {
+        if let Some(mid) = &meeting_id {
+            let db_clone = state.db.clone();
+            let settings_clone = state.settings.clone();
+            let mid_clone = mid.clone();
+            let transcript_text: String = transcript.iter()
+                .map(|s| format!("[{}] {}", s.time, s.text))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            tauri::async_runtime::spawn(async move {
+                let settings = settings_clone.lock().await;
+                let provider = match settings.llm_provider.as_str() {
+                    "openai" => {
+                        match settings.openai_api_key.clone() {
+                            Some(key) if !key.is_empty() => LlmProvider::OpenAI { api_key: key },
+                            _ => return,
+                        }
+                    }
+                    _ => {
+                        let url = settings.ollama_url.clone()
+                            .unwrap_or_else(|| "http://localhost:11434".to_string());
+                        let model = settings.ollama_model.clone()
+                            .unwrap_or_else(|| "llama3.2".to_string());
+                        LlmProvider::Ollama { url, model }
+                    }
+                };
+                drop(settings);
+
+                let client = LlmClient::new(provider);
+                match client.summarize(&transcript_text).await {
+                    Ok(summary_text) => {
+                        if let Err(e) = db_clone.save_meeting_summary(&mid_clone, &summary_text) {
+                            log::error!("Failed to save auto-summary: {}", e);
+                        } else {
+                            log::info!("Auto-summary saved for meeting {}", mid_clone);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Auto-summary generation failed (non-critical): {}", e);
+                    }
+                }
+            });
+        }
+    }
+
     Ok(transcript)
 }
 
@@ -705,6 +752,222 @@ pub async fn ask_question(
     client.answer_question(&context, &question)
         .await
         .map_err(|e| format!("LLM error: {}", e))
+}
+
+/// Phomy: intelligent assistant that routes queries appropriately
+/// Handles recency, time-based, meeting recall, and global summary queries
+#[tauri::command]
+pub async fn phomy_ask(
+    question: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let q = question.to_lowercase();
+
+    // Build LLM client from settings
+    let provider = {
+        let settings = state.settings.lock().await;
+        match settings.llm_provider.as_str() {
+            "openai" => {
+                let api_key = settings.openai_api_key.clone()
+                    .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
+                if api_key.is_empty() {
+                    return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+                }
+                LlmProvider::OpenAI { api_key }
+            }
+            _ => {
+                let url = settings.ollama_url.clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string());
+                let model = settings.ollama_model.clone()
+                    .unwrap_or_else(|| "llama3.2".to_string());
+                LlmProvider::Ollama { url, model }
+            }
+        }
+    };
+    let client = LlmClient::new(provider);
+
+    // ---- Route 1: "What did they just say?" / recency queries ----
+    let is_recency = q.contains("just said") || q.contains("just say")
+        || q.contains("they just") || q.contains("last thing")
+        || q.contains("just now") || q.contains("right now")
+        || (q.contains("what") && q.contains("just"));
+
+    if is_recency {
+        // Use live transcript (last ~10 chunks) or active meeting
+        let context = {
+            let is_recording = *state.is_recording.lock().await;
+            let active_mid = state.active_meeting_id.lock().await.clone();
+
+            if is_recording {
+                let transcript = state.transcript.lock().await;
+                let recent: Vec<_> = transcript.iter().rev().take(10).collect::<Vec<_>>().into_iter().rev().collect();
+                recent.iter().map(|s| format!("[{}] {}", s.time, s.text)).collect::<Vec<_>>().join("\n")
+            } else if let Some(mid) = active_mid {
+                let segs = state.db.get_last_segments(&mid, 10).map_err(|e| format!("DB error: {}", e))?;
+                segs.iter().map(|s| format!("[{}] {}", s.time_label, s.text)).collect::<Vec<_>>().join("\n")
+            } else {
+                return Err("No active meeting to reference.".to_string());
+            }
+        };
+
+        if context.is_empty() {
+            return Err("No recent transcript available.".to_string());
+        }
+
+        let system = "You are Phomy, a calm meeting assistant. Summarize what was just said based on the most recent transcript chunks. Be brief and direct.";
+        let user = format!("Recent transcript:\n{}\n\nQuestion: {}", context, question);
+        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+    }
+
+    // ---- Route 2: Time-based queries ("last 5 minutes", "past 10 minutes") ----
+    let time_minutes = extract_time_minutes(&q);
+    if let Some(mins) = time_minutes {
+        let context = {
+            let is_recording = *state.is_recording.lock().await;
+            let active_mid = state.active_meeting_id.lock().await.clone();
+
+            if is_recording {
+                let transcript = state.transcript.lock().await;
+                if let Some(latest) = transcript.last() {
+                    let cutoff = (latest.timestamp_ms as i64) - (mins * 60 * 1000);
+                    let filtered: Vec<_> = transcript.iter()
+                        .filter(|s| s.timestamp_ms as i64 >= cutoff)
+                        .collect();
+                    filtered.iter().map(|s| format!("[{}] {}", s.time, s.text)).collect::<Vec<_>>().join("\n")
+                } else {
+                    String::new()
+                }
+            } else if let Some(mid) = active_mid {
+                let segs = state.db.get_segments(&mid).map_err(|e| format!("DB error: {}", e))?;
+                if let Some(latest) = segs.last() {
+                    let cutoff = latest.timestamp_ms - (mins * 60 * 1000);
+                    let filtered: Vec<_> = segs.iter().filter(|s| s.timestamp_ms >= cutoff).collect();
+                    filtered.iter().map(|s| format!("[{}] {}", s.time_label, s.text)).collect::<Vec<_>>().join("\n")
+                } else {
+                    String::new()
+                }
+            } else {
+                return Err("No active meeting to reference.".to_string());
+            }
+        };
+
+        if context.is_empty() {
+            return Err("No transcript in that time range.".to_string());
+        }
+
+        let system = "You are Phomy, a calm meeting assistant. Summarize the transcript from the requested time window. Be concise.";
+        let user = format!("Transcript from the last {} minutes:\n{}\n\nQuestion: {}", mins, context, question);
+        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+    }
+
+    // ---- Route 3: Meeting recall ("last meeting", "previous meeting") ----
+    let is_recall = q.contains("last meeting") || q.contains("previous meeting")
+        || q.contains("most recent meeting");
+
+    if is_recall {
+        let meetings = state.db.get_recent_meetings_with_summaries(1)
+            .map_err(|e| format!("DB error: {}", e))?;
+
+        if meetings.is_empty() {
+            return Err("No completed meetings found.".to_string());
+        }
+
+        let (mid, title, created_at, summary) = &meetings[0];
+        let context = if let Some(s) = summary {
+            format!("Meeting: {} ({})\nSummary:\n{}", title, created_at, s)
+        } else {
+            // Fall back to transcript chunks
+            let segs = state.db.get_segments(mid).map_err(|e| format!("DB error: {}", e))?;
+            let transcript: String = segs.iter()
+                .map(|s| format!("[{}] {}", s.time_label, s.text))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("Meeting: {} ({})\nTranscript:\n{}", title, created_at, transcript)
+        };
+
+        let system = "You are Phomy, a calm meeting assistant. Answer the question using the meeting context provided. Be helpful and concise.";
+        let user = format!("{}\n\nQuestion: {}", context, question);
+        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+    }
+
+    // ---- Route 4: Global/weekly summaries ("this week", "all meetings", "overall") ----
+    let is_global = q.contains("this week") || q.contains("all meetings")
+        || q.contains("overall") || q.contains("week cover")
+        || q.contains("meetings about") || q.contains("my meetings");
+
+    if is_global {
+        let meetings = state.db.get_recent_meetings_with_summaries(10)
+            .map_err(|e| format!("DB error: {}", e))?;
+
+        if meetings.is_empty() {
+            return Err("No completed meetings found.".to_string());
+        }
+
+        let context: String = meetings.iter().map(|(_, title, created_at, summary)| {
+            if let Some(s) = summary {
+                format!("--- {} ({}) ---\n{}\n", title, created_at, s)
+            } else {
+                format!("--- {} ({}) ---\n(no summary available)\n", title, created_at)
+            }
+        }).collect::<Vec<_>>().join("\n");
+
+        let system = "You are Phomy, a calm meeting assistant. Provide a high-level overview across the meetings described. Be concise and organized.";
+        let user = format!("Meeting summaries:\n{}\n\nQuestion: {}", context, question);
+        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+    }
+
+    // ---- Default: semantic search across all meetings (existing behavior) ----
+    let limit = 10;
+    let semantic_context: Option<String> = {
+        let query_emb = {
+            let model_guard = state.embedding_model.lock().await;
+            match model_guard.as_ref() {
+                Some(model) => model.embed(&question).ok(),
+                None => None,
+            }
+        };
+        if let Some(emb) = query_emb {
+            match state.db.search_semantic(&emb, limit, None) {
+                Ok(results) if !results.is_empty() => {
+                    Some(results.iter()
+                        .map(|r| format!("[{} - {}] {}", r.meeting_title, r.time_label, r.text))
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    };
+
+    let context = match semantic_context {
+        Some(ctx) => ctx,
+        None => return Err("No relevant context found. Try asking about a specific meeting.".to_string()),
+    };
+
+    let system = "You are Phomy, a calm meeting assistant. Answer the question using the provided meeting context. Be helpful and concise. If the answer isn't in the context, say so.";
+    let user = format!("Context:\n{}\n\nQuestion: {}", context, question);
+    client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e))
+}
+
+/// Extract time in minutes from natural language (e.g., "last 5 minutes" → 5)
+fn extract_time_minutes(q: &str) -> Option<i64> {
+    use std::str::FromStr;
+    // Patterns: "last N minutes", "past N minutes", "last N mins"
+    let patterns = ["last ", "past "];
+    for pat in &patterns {
+        if let Some(idx) = q.find(pat) {
+            let after = &q[idx + pat.len()..];
+            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = i64::from_str(&num_str) {
+                if after.contains("minute") || after.contains("min") {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Generate meeting summary using LLM

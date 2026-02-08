@@ -43,7 +43,7 @@
 
   const navItems: { view: View; label: string; icon: string }[] = [
     { view: 'home', label: 'Home', icon: 'home' },
-    { view: 'genie', label: 'Genie', icon: 'sparkles' },
+    { view: 'phomy', label: 'Phomy', icon: 'ghost' },
     { view: 'settings', label: 'Settings', icon: 'cog' },
   ];
 </script>
@@ -63,7 +63,7 @@
       </svg>
     </button>
     {#if !collapsed}
-      <span class="font-semibold text-sidecar-text">Sidecar</span>
+      <span class="font-semibold text-sidecar-text">PhantomEar</span>
     {/if}
   </div>
 
@@ -79,9 +79,9 @@
           <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
-        {:else if item.icon === 'sparkles'}
-          <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+        {:else if item.icon === 'ghost'}
+          <svg class="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
           </svg>
         {:else if item.icon === 'cog'}
           <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

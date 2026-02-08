@@ -28,6 +28,7 @@ pub struct MeetingRow {
     pub ended_at: Option<String>,
     pub pinned: bool,
     pub duration_ms: i64,
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -138,6 +139,20 @@ impl Database {
             END;
             ",
         )?;
+
+        // Migration: add summary column if it doesn't exist
+        let has_summary: bool = {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='summary'"
+            )?;
+            let count: i64 = stmt.query_row([], |row| row.get(0))?;
+            count > 0
+        };
+        if !has_summary {
+            conn.execute_batch("ALTER TABLE meetings ADD COLUMN summary TEXT;")?;
+            log::info!("Added summary column to meetings table");
+        }
+
         Ok(())
     }
 
@@ -157,7 +172,7 @@ impl Database {
     pub fn get_meeting(&self, id: &str) -> Result<Option<MeetingRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, ended_at, pinned, duration_ms FROM meetings WHERE id = ?1",
+            "SELECT id, title, created_at, ended_at, pinned, duration_ms, summary FROM meetings WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], |row| {
             Ok(MeetingRow {
@@ -167,6 +182,7 @@ impl Database {
                 ended_at: row.get(3)?,
                 pinned: row.get::<_, i32>(4)? != 0,
                 duration_ms: row.get(5)?,
+                summary: row.get(6)?,
             })
         })?;
         match rows.next() {
@@ -224,6 +240,98 @@ impl Database {
             params![pinned as i32, id],
         )?;
         Ok(())
+    }
+
+    pub fn save_meeting_summary(&self, id: &str, summary: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE meetings SET summary = ?1 WHERE id = ?2",
+            params![summary, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_meeting_summary(&self, id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT summary FROM meetings WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], |row| row.get::<_, Option<String>>(0))?;
+        match rows.next() {
+            Some(Ok(val)) => Ok(val),
+            Some(Err(e)) => Err(e.into()),
+            None => Ok(None),
+        }
+    }
+
+    /// Get recent completed meetings with their summaries for Phomy global queries
+    pub fn get_recent_meetings_with_summaries(&self, limit: usize) -> Result<Vec<(String, String, String, Option<String>)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, created_at, summary FROM meetings
+             WHERE ended_at IS NOT NULL
+             ORDER BY created_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Get segments within a timestamp range for a meeting (for time-based queries)
+    pub fn get_segments_in_range(&self, meeting_id: &str, from_ms: i64, to_ms: i64) -> Result<Vec<SegmentRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, meeting_id, time_label, text, timestamp_ms
+             FROM transcript_segments
+             WHERE meeting_id = ?1 AND timestamp_ms >= ?2 AND timestamp_ms <= ?3
+             ORDER BY timestamp_ms ASC",
+        )?;
+        let segments = stmt
+            .query_map(params![meeting_id, from_ms, to_ms], |row| {
+                Ok(SegmentRow {
+                    id: row.get(0)?,
+                    meeting_id: row.get(1)?,
+                    time_label: row.get(2)?,
+                    text: row.get(3)?,
+                    timestamp_ms: row.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(segments)
+    }
+
+    /// Get the last N segments of a meeting (for "what did they just say")
+    pub fn get_last_segments(&self, meeting_id: &str, limit: usize) -> Result<Vec<SegmentRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, meeting_id, time_label, text, timestamp_ms
+             FROM transcript_segments
+             WHERE meeting_id = ?1
+             ORDER BY timestamp_ms DESC
+             LIMIT ?2",
+        )?;
+        let mut segments = stmt
+            .query_map(params![meeting_id, limit as i64], |row| {
+                Ok(SegmentRow {
+                    id: row.get(0)?,
+                    meeting_id: row.get(1)?,
+                    time_label: row.get(2)?,
+                    text: row.get(3)?,
+                    timestamp_ms: row.get(4)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        segments.reverse(); // Return in chronological order
+        Ok(segments)
     }
 
     pub fn delete_meeting(&self, id: &str) -> Result<()> {
