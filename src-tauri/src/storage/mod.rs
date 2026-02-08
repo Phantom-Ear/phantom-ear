@@ -11,6 +11,16 @@ use std::sync::Mutex;
 // ============================================================================
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SemanticSearchResult {
+    pub meeting_id: String,
+    pub meeting_title: String,
+    pub segment_id: String,
+    pub text: String,
+    pub time_label: String,
+    pub score: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MeetingRow {
     pub id: String,
     pub title: String,
@@ -97,6 +107,13 @@ impl Database {
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+
+            -- Embeddings storage for semantic search
+            CREATE TABLE IF NOT EXISTS segment_embeddings (
+                segment_id TEXT PRIMARY KEY,
+                embedding BLOB NOT NULL,
+                FOREIGN KEY (segment_id) REFERENCES transcript_segments(id) ON DELETE CASCADE
             );
 
             -- FTS5 virtual table for full-text search
@@ -279,6 +296,134 @@ impl Database {
     }
 
     // ========================================================================
+    // Embeddings
+    // ========================================================================
+
+    /// Store an embedding (f32 LE bytes) for a segment
+    pub fn insert_embedding(&self, segment_id: &str, embedding: &[f32]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let bytes: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
+        conn.execute(
+            "INSERT OR REPLACE INTO segment_embeddings (segment_id, embedding) VALUES (?1, ?2)",
+            params![segment_id, bytes],
+        )?;
+        Ok(())
+    }
+
+    /// Cosine similarity search across embeddings, optionally scoped to one meeting
+    pub fn search_semantic(
+        &self,
+        query_emb: &[f32],
+        limit: usize,
+        meeting_id: Option<&str>,
+    ) -> Result<Vec<SemanticSearchResult>> {
+        let conn = self.conn.lock().unwrap();
+
+        let sql = if meeting_id.is_some() {
+            "SELECT se.segment_id, se.embedding, ts.text, ts.time_label, ts.meeting_id, m.title
+             FROM segment_embeddings se
+             JOIN transcript_segments ts ON ts.id = se.segment_id
+             JOIN meetings m ON m.id = ts.meeting_id
+             WHERE ts.meeting_id = ?1"
+        } else {
+            "SELECT se.segment_id, se.embedding, ts.text, ts.time_label, ts.meeting_id, m.title
+             FROM segment_embeddings se
+             JOIN transcript_segments ts ON ts.id = se.segment_id
+             JOIN meetings m ON m.id = ts.meeting_id"
+        };
+
+        let mut stmt = conn.prepare(sql)?;
+
+        let rows: Vec<(String, Vec<u8>, String, String, String, String)> = if let Some(mid) = meeting_id {
+            stmt.query_map(params![mid], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+        } else {
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+
+        // Compute cosine similarity in Rust and sort
+        let mut scored: Vec<SemanticSearchResult> = rows
+            .into_iter()
+            .filter_map(|(seg_id, emb_bytes, text, time_label, mid, title)| {
+                let emb = bytes_to_f32(&emb_bytes);
+                if emb.len() != query_emb.len() {
+                    return None;
+                }
+                let score = cosine_similarity(query_emb, &emb);
+                Some(SemanticSearchResult {
+                    meeting_id: mid,
+                    meeting_title: title,
+                    segment_id: seg_id,
+                    text,
+                    time_label,
+                    score,
+                })
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+        Ok(scored)
+    }
+
+    /// Get segment IDs that don't have embeddings yet for a given meeting
+    pub fn get_unembedded_segment_ids(&self, meeting_id: &str) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT ts.id, ts.time_label, ts.text
+             FROM transcript_segments ts
+             LEFT JOIN segment_embeddings se ON se.segment_id = ts.id
+             WHERE ts.meeting_id = ?1 AND se.segment_id IS NULL
+             ORDER BY ts.timestamp_ms ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![meeting_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Count embedded vs total segments
+    pub fn count_embeddings(&self) -> Result<(u64, u64)> {
+        let conn = self.conn.lock().unwrap();
+        let embedded: u64 = conn.query_row(
+            "SELECT COUNT(*) FROM segment_embeddings",
+            [],
+            |row| row.get(0),
+        )?;
+        let total: u64 = conn.query_row(
+            "SELECT COUNT(*) FROM transcript_segments",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok((embedded, total))
+    }
+
+    // ========================================================================
     // Settings
     // ========================================================================
 
@@ -302,4 +447,28 @@ impl Database {
             None => Ok(None),
         }
     }
+}
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let mut dot = 0.0f32;
+    let mut norm_a = 0.0f32;
+    let mut norm_b = 0.0f32;
+    for i in 0..a.len() {
+        dot += a[i] * b[i];
+        norm_a += a[i] * a[i];
+        norm_b += b[i] * b[i];
+    }
+    let denom = norm_a.sqrt() * norm_b.sqrt();
+    if denom > 0.0 { dot / denom } else { 0.0 }
 }

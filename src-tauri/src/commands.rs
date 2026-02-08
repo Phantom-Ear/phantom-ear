@@ -6,9 +6,10 @@ use crate::asr::AsrBackendType;
 #[cfg(feature = "parakeet")]
 use crate::asr::parakeet_backend::ParakeetModel;
 use crate::audio::AudioCapture;
+use crate::embeddings::{self, EmbeddingModel};
 use crate::llm::{LlmClient, LlmProvider};
 use crate::models::{self, ModelInfo};
-use crate::storage::{Database, MeetingListItem, SearchResult, SegmentRow};
+use crate::storage::{Database, MeetingListItem, SearchResult, SemanticSearchResult, SegmentRow};
 use crate::transcription::TranscriptionConfig;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,13 @@ pub struct MeetingWithTranscript {
     pub segments: Vec<TranscriptSegment>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmbeddingStatus {
+    pub model_loaded: bool,
+    pub embedded_count: u64,
+    pub total_segments: u64,
+}
+
 // ============================================================================
 // App State
 // ============================================================================
@@ -105,6 +113,7 @@ pub struct AppState {
     pub settings: Arc<Mutex<Settings>>,
     pub db: Arc<Database>,
     pub active_meeting_id: Arc<Mutex<Option<String>>>,
+    pub embedding_model: Arc<Mutex<Option<EmbeddingModel>>>,
 }
 
 // ============================================================================
@@ -174,7 +183,9 @@ pub async fn start_recording(
     let is_paused_arc = state.is_paused.clone();
     let transcript_arc = state.transcript.clone();
     let db_arc = state.db.clone();
+    let emb_model_arc = state.embedding_model.clone();
     let mid = meeting_id.clone();
+    let meeting_title = title.clone();
     let app_clone = app.clone();
 
     tauri::async_runtime::spawn(async move {
@@ -188,6 +199,8 @@ pub async fn start_recording(
             TranscriptionConfig::default(),
             db_arc,
             mid,
+            emb_model_arc,
+            meeting_title,
         ).await;
     });
 
@@ -206,6 +219,8 @@ async fn run_transcription_loop_with_storage(
     config: TranscriptionConfig,
     db: Arc<Database>,
     meeting_id: String,
+    embedding_model: Arc<Mutex<Option<EmbeddingModel>>>,
+    meeting_title: String,
 ) {
     use crate::asr::resample_to_16khz;
     use crate::transcription::TranscriptionEvent;
@@ -295,7 +310,7 @@ async fn run_transcription_loop_with_storage(
                             if !text.is_empty() {
                                 segment_counter += 1;
 
-                                let seg_id = format!("seg-{}", segment_counter);
+                                let seg_id = format!("{}-seg-{}", meeting_id, segment_counter);
                                 let time_label = format_time(total_duration_ms as u64);
 
                                 let event = TranscriptionEvent {
@@ -318,6 +333,9 @@ async fn run_transcription_loop_with_storage(
                                 }
 
                                 // Persist segment to DB
+                                let seg_id_for_emb = seg_id.clone();
+                                let time_label_for_emb = time_label.clone();
+                                let text_for_emb = text.to_string();
                                 if let Err(e) = db.insert_segment(&SegmentRow {
                                     id: seg_id,
                                     meeting_id: meeting_id.clone(),
@@ -326,6 +344,31 @@ async fn run_transcription_loop_with_storage(
                                     timestamp_ms: total_duration_ms,
                                 }) {
                                     log::error!("Failed to persist segment: {}", e);
+                                }
+
+                                // Generate embedding in background (non-blocking)
+                                {
+                                    let emb_model = embedding_model.clone();
+                                    let emb_db = db.clone();
+                                    let emb_title = meeting_title.clone();
+                                    tokio::spawn(async move {
+                                        let model_guard = emb_model.lock().await;
+                                        if let Some(ref m) = *model_guard {
+                                            let enriched = embeddings::enrich_segment(
+                                                &emb_title, &time_label_for_emb, &text_for_emb,
+                                            );
+                                            match m.embed(&enriched) {
+                                                Ok(emb) => {
+                                                    if let Err(e) = emb_db.insert_embedding(&seg_id_for_emb, &emb) {
+                                                        log::error!("Failed to store embedding: {}", e);
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    log::error!("Embedding failed: {}", e);
+                                                }
+                                            }
+                                        }
+                                    });
                                 }
 
                                 total_duration_ms += duration_ms;
@@ -575,10 +618,46 @@ pub async fn export_meeting(
 pub async fn ask_question(
     question: String,
     meeting_id: Option<String>,
+    context_limit: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // Build context: from DB if meeting_id provided, otherwise from live transcript
-    let context: String = if let Some(ref mid) = meeting_id {
+    let limit = context_limit.unwrap_or(10);
+
+    // Resolve the meeting scope: explicit meeting_id, or active meeting for live recording
+    let effective_meeting_id: Option<String> = if meeting_id.is_some() {
+        meeting_id.clone()
+    } else {
+        state.active_meeting_id.lock().await.clone()
+    };
+
+    // Try semantic search first if embedding model is loaded
+    let semantic_context: Option<String> = {
+        let query_emb = {
+            let model_guard = state.embedding_model.lock().await;
+            match model_guard.as_ref() {
+                Some(model) => model.embed(&question).ok(),
+                None => None,
+            }
+        };
+        if let Some(emb) = query_emb {
+            match state.db.search_semantic(&emb, limit, effective_meeting_id.as_deref()) {
+                Ok(results) if !results.is_empty() => {
+                    Some(results.iter()
+                        .map(|r| format!("[{}] {}", r.time_label, r.text))
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    };
+
+    // Use semantic context if available, otherwise fall back to full transcript
+    let context: String = if let Some(ctx) = semantic_context {
+        ctx
+    } else if let Some(ref mid) = meeting_id {
         let segments = state.db.get_segments(mid)
             .map_err(|e| format!("DB error: {}", e))?;
         if segments.is_empty() {
@@ -961,4 +1040,129 @@ pub async fn get_model_recommendation() -> Result<ModelRecommendation, String> {
 #[tauri::command]
 pub async fn get_asr_backends() -> Result<Vec<BackendInfo>, String> {
     Ok(get_available_backends())
+}
+
+// ============================================================================
+// Embedding Commands
+// ============================================================================
+
+/// Download and load the BGE-small embedding model
+#[tauri::command]
+pub async fn download_embedding_model_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let model_dir = models::download_embedding_model(&app)
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    let model = EmbeddingModel::load(&model_dir)
+        .map_err(|e| format!("Failed to load embedding model: {}", e))?;
+
+    *state.embedding_model.lock().await = Some(model);
+    log::info!("Embedding model loaded and ready");
+    Ok(())
+}
+
+/// Load an already-downloaded embedding model
+#[tauri::command]
+pub async fn load_embedding_model(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let model_dir = models::get_embedding_model_dir()
+        .map_err(|e| format!("Failed to get model dir: {}", e))?;
+
+    if !model_dir.join("model.onnx").exists() {
+        return Err("Embedding model not downloaded".to_string());
+    }
+
+    let model = EmbeddingModel::load(&model_dir)
+        .map_err(|e| format!("Failed to load embedding model: {}", e))?;
+
+    *state.embedding_model.lock().await = Some(model);
+    log::info!("Embedding model loaded");
+    Ok(())
+}
+
+/// Semantic search across embeddings
+#[tauri::command]
+pub async fn semantic_search(
+    query: String,
+    meeting_id: Option<String>,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<SemanticSearchResult>, String> {
+    let lim = limit.unwrap_or(10);
+
+    let model_guard = state.embedding_model.lock().await;
+    let model = model_guard.as_ref()
+        .ok_or("Embedding model not loaded")?;
+
+    let query_emb = model.embed(&query)
+        .map_err(|e| format!("Embedding failed: {}", e))?;
+    drop(model_guard);
+
+    state.db.search_semantic(&query_emb, lim, meeting_id.as_deref())
+        .map_err(|e| format!("Search error: {}", e))
+}
+
+/// Batch embed all unembedded segments in a meeting
+#[tauri::command]
+pub async fn embed_meeting(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<u64, String> {
+    let model_guard = state.embedding_model.lock().await;
+    let model = model_guard.as_ref()
+        .ok_or("Embedding model not loaded")?;
+
+    // Get meeting title for enrichment
+    let meeting = state.db.get_meeting(&meeting_id)
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or("Meeting not found")?;
+
+    let unembedded = state.db.get_unembedded_segment_ids(&meeting_id)
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let mut count = 0u64;
+    for (seg_id, time_label, text) in &unembedded {
+        let enriched = embeddings::enrich_segment(&meeting.title, time_label, text);
+        match model.embed(&enriched) {
+            Ok(emb) => {
+                if let Err(e) = state.db.insert_embedding(seg_id, &emb) {
+                    log::error!("Failed to store embedding for {}: {}", seg_id, e);
+                } else {
+                    count += 1;
+                }
+            }
+            Err(e) => {
+                log::error!("Embedding failed for {}: {}", seg_id, e);
+            }
+        }
+    }
+
+    log::info!("Embedded {} segments for meeting {}", count, meeting_id);
+    Ok(count)
+}
+
+/// Get embedding status (model loaded, counts)
+#[tauri::command]
+pub async fn get_embedding_status(
+    state: State<'_, AppState>,
+) -> Result<EmbeddingStatus, String> {
+    let model_loaded = state.embedding_model.lock().await.is_some();
+    let (embedded_count, total_segments) = state.db.count_embeddings()
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(EmbeddingStatus {
+        model_loaded,
+        embedded_count,
+        total_segments,
+    })
+}
+
+/// Check if embedding model is downloaded
+#[tauri::command]
+pub async fn is_embedding_model_downloaded() -> Result<bool, String> {
+    Ok(models::is_embedding_model_downloaded())
 }

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { MeetingListItem, MeetingWithTranscript, TranscriptSegment, SearchResult } from '$lib/types';
+import type { MeetingListItem, MeetingWithTranscript, TranscriptSegment, SearchResult, SemanticSearchResult } from '$lib/types';
 
 function createMeetingsStore() {
   let meetings = $state<MeetingListItem[]>([]);
@@ -93,6 +93,19 @@ function createMeetingsStore() {
     }
   }
 
+  async function semanticSearch(query: string, meetingId?: string, limit?: number): Promise<SemanticSearchResult[]> {
+    try {
+      return await invoke<SemanticSearchResult[]>('semantic_search', {
+        query,
+        meetingId: meetingId || null,
+        limit: limit || 10,
+      });
+    } catch (e) {
+      console.error('Semantic search failed:', e);
+      return [];
+    }
+  }
+
   async function exportMeeting(id: string, format: string = 'markdown'): Promise<string> {
     return invoke<string>('export_meeting', { id, format });
   }
@@ -120,6 +133,7 @@ function createMeetingsStore() {
     togglePin,
     deleteMeeting,
     searchMeetings,
+    semanticSearch,
     exportMeeting,
     getPinnedMeetings,
     getRecentMeetings,
