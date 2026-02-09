@@ -1,6 +1,8 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { onMount, onDestroy } from "svelte";
 
   interface ModelInfo {
@@ -49,9 +51,13 @@
   let deviceSpecs = $state<DeviceSpecs | null>(null);
   let recommendation = $state<ModelRecommendation | null>(null);
 
+  // Manual download flow
+  let showManualDownload = $state(false);
+  let isImporting = $state(false);
+  let downloadFailed = $state(false);
+
   onMount(async () => {
     try {
-      // Load models and device specs in parallel
       const [loadedModels, specs, rec] = await Promise.all([
         invoke<ModelInfo[]>("get_models_info"),
         invoke<DeviceSpecs>("get_device_specs"),
@@ -62,23 +68,22 @@
       deviceSpecs = specs;
       recommendation = rec;
 
-      // Auto-select recommended model
       if (rec.recommended_model) {
         selectedModel = rec.recommended_model;
       }
 
-      // Listen for download progress events
       unlisten = await listen<DownloadProgress>("model-download-progress", (event) => {
         downloadProgress = event.payload;
         if (event.payload.status === "Completed") {
           isDownloading = false;
-          // Small delay to show completion, then proceed
+          downloadFailed = false;
           setTimeout(() => {
             onComplete();
           }, 1000);
         } else if (event.payload.status === "Failed") {
           isDownloading = false;
-          error = "Download failed. Please try again.";
+          downloadFailed = true;
+          error = "";
         }
       });
     } catch (e) {
@@ -95,13 +100,66 @@
   async function startDownload() {
     error = "";
     isDownloading = true;
+    downloadFailed = false;
     downloadProgress = null;
+    showManualDownload = false;
 
     try {
       await invoke("download_model", { modelName: selectedModel });
     } catch (e) {
-      error = `Download error: ${e}`;
+      const errMsg = String(e);
+      if (errMsg.includes("too small") || errMsg.includes("firewall") || errMsg.includes("proxy")) {
+        downloadFailed = true;
+        error = "";
+      } else {
+        error = `Download error: ${e}`;
+      }
       isDownloading = false;
+    }
+  }
+
+  async function openManualDownload() {
+    showManualDownload = true;
+    downloadFailed = false;
+    error = "";
+
+    try {
+      const urls = await invoke<{ huggingface: string; github: string }>("get_model_download_url", { modelName: selectedModel });
+      // Open GitHub release (zip) — more likely to work on restricted networks
+      await openUrl(urls.github);
+    } catch (e) {
+      error = `Failed to open download link: ${e}`;
+    }
+  }
+
+  async function importModelFile() {
+    error = "";
+    isImporting = true;
+
+    try {
+      const selected = await open({
+        title: "Select downloaded model file",
+        filters: [{ name: "Model files", extensions: ["bin", "zip"] }],
+        multiple: false,
+      });
+
+      if (!selected) {
+        isImporting = false;
+        return;
+      }
+
+      const filePath = typeof selected === "string" ? selected : selected;
+
+      await invoke("import_model", {
+        filePath,
+        modelName: selectedModel,
+      });
+
+      isImporting = false;
+      onComplete();
+    } catch (e) {
+      error = `Import failed: ${e}`;
+      isImporting = false;
     }
   }
 
@@ -110,6 +168,11 @@
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  function getModelSizeMb(): number {
+    const m = models.find(m => m.name === selectedModel);
+    return m?.size_mb ?? 0;
   }
 </script>
 
@@ -132,7 +195,7 @@
     </div>
 
     <!-- Device Specs Card (if detected) -->
-    {#if deviceSpecs && !isDownloading}
+    {#if deviceSpecs && !isDownloading && !showManualDownload}
       <div class="glass rounded-xl border border-sidecar-border p-4 mb-4 shadow-glow-surface">
         <div class="flex items-center gap-2 mb-3">
           <svg class="w-4 h-4 text-sidecar-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -168,7 +231,110 @@
 
     <!-- Setup Card -->
     <div class="glass rounded-2xl border border-sidecar-border p-6 shadow-glow-surface">
-      {#if !isDownloading}
+
+      {#if showManualDownload}
+        <!-- Manual Download Flow -->
+        <div class="text-center">
+          <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-sidecar-accent/20 flex items-center justify-center">
+            <svg class="w-7 h-7 text-sidecar-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </div>
+
+          <h2 class="text-lg font-medium mb-2">Manual Download</h2>
+          <p class="text-sm text-sidecar-text-muted mb-4">
+            A browser window has opened to download the <span class="text-sidecar-text font-medium capitalize">{selectedModel}</span> model ({getModelSizeMb()} MB).
+          </p>
+
+          <div class="bg-sidecar-surface/50 border border-sidecar-border/50 rounded-xl p-4 mb-5">
+            <div class="flex items-start gap-3">
+              <div class="w-6 h-6 rounded-full bg-sidecar-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-xs font-bold text-sidecar-accent">1</span>
+              </div>
+              <p class="text-sm text-sidecar-text-muted text-left">
+                Wait for the <span class="text-sidecar-text">.zip</span> file to finish downloading in your browser (~1 min)
+              </p>
+            </div>
+            <div class="flex items-start gap-3 mt-3">
+              <div class="w-6 h-6 rounded-full bg-sidecar-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-xs font-bold text-sidecar-accent">2</span>
+              </div>
+              <p class="text-sm text-sidecar-text-muted text-left">
+                Click <span class="text-sidecar-text">Import Model</span> below and select the downloaded .zip or .bin file
+              </p>
+            </div>
+          </div>
+
+          {#if error}
+            <div class="mb-4 p-3 rounded-xl bg-sidecar-danger/10 border border-sidecar-danger/20 text-sidecar-danger text-sm">
+              {error}
+            </div>
+          {/if}
+
+          <button
+            onclick={importModelFile}
+            disabled={isImporting}
+            class="w-full py-3.5 px-4 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl font-medium transition-all hover-lift btn-shine disabled:opacity-50"
+          >
+            {#if isImporting}
+              Importing...
+            {:else}
+              Import Model
+            {/if}
+          </button>
+
+          <div class="flex gap-3 mt-3">
+            <button
+              onclick={openManualDownload}
+              class="flex-1 py-2.5 px-4 border border-sidecar-border rounded-xl text-sm text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors"
+            >
+              Re-open Link
+            </button>
+            <button
+              onclick={() => { showManualDownload = false; downloadFailed = false; }}
+              class="flex-1 py-2.5 px-4 border border-sidecar-border rounded-xl text-sm text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors"
+            >
+              Back
+            </button>
+          </div>
+        </div>
+
+      {:else if downloadFailed}
+        <!-- Download Failed - Retry / Manual -->
+        <div class="text-center">
+          <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-sidecar-warning/20 flex items-center justify-center">
+            <svg class="w-7 h-7 text-sidecar-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+
+          <h2 class="text-lg font-medium mb-2">Download Blocked</h2>
+          <p class="text-sm text-sidecar-text-muted mb-6">
+            The automatic download was blocked, likely by a corporate firewall or proxy. You can retry or download the model manually.
+          </p>
+
+          <div class="space-y-3">
+            <button
+              onclick={startDownload}
+              class="w-full py-3.5 px-4 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl font-medium transition-all hover-lift btn-shine"
+            >
+              Retry Download
+            </button>
+            <button
+              onclick={openManualDownload}
+              class="w-full py-3 px-4 border border-sidecar-border rounded-xl font-medium text-sidecar-text hover:border-sidecar-accent hover:text-sidecar-accent transition-colors"
+            >
+              Download Manually
+            </button>
+          </div>
+
+          <p class="text-xs text-sidecar-text-muted mt-4">
+            Manual download takes about 1 minute on a fast connection
+          </p>
+        </div>
+
+      {:else if !isDownloading}
+        <!-- Normal Setup - Model Selection -->
         <h2 class="text-lg font-medium mb-4">Download Speech Model</h2>
         <p class="text-sm text-sidecar-text-muted mb-6">
           PhantomEar uses a local AI model for speech recognition. All transcription happens on your device - your audio never leaves your computer.

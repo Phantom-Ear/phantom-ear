@@ -49,6 +49,15 @@ impl WhisperModel {
         }
     }
 
+    /// GitHub Releases fallback URL (zipped model from dedicated "models" release)
+    pub fn github_release_url(&self) -> String {
+        format!(
+            "https://github.com/Phantom-Ear/phantom-ear/releases/download/models/{}.zip",
+            self.filename().trim_end_matches(".bin")
+            
+        )
+    }
+
     pub fn size_mb(&self) -> u64 {
         match self {
             WhisperModel::Tiny => 75,

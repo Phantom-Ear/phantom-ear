@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { openUrl } from "@tauri-apps/plugin-opener";
 
   interface Settings {
     llm_provider: string;
@@ -44,6 +46,9 @@
   let models = $state<ModelInfo[]>([]);
   let isLoading = $state(true);
   let isSaving = $state(false);
+  let isImporting = $state(false);
+  let importError = $state("");
+  let importSuccess = $state("");
   let activeTab = $state<"general" | "llm">("general");
 
   const languages = [
@@ -92,6 +97,30 @@
       console.error("Failed to save settings:", e);
     }
     isSaving = false;
+  }
+
+  async function importModelFile() {
+    importError = "";
+    importSuccess = "";
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "Whisper Model", extensions: ["bin", "zip"] }],
+      });
+      if (!selected) return;
+
+      isImporting = true;
+      await invoke("import_model", {
+        filePath: selected,
+        modelName: settings.whisper_model,
+      });
+      importSuccess = "Model imported successfully!";
+      // Refresh model list
+      models = await invoke<ModelInfo[]>("get_models_info");
+    } catch (e: any) {
+      importError = typeof e === "string" ? e : e.message || "Import failed";
+    }
+    isImporting = false;
   }
 
   // Load settings on mount
@@ -269,6 +298,30 @@
                 </label>
               {/each}
             </div>
+
+            <!-- Import Model -->
+            <div class="mt-3 flex items-center gap-2">
+              <button
+                onclick={importModelFile}
+                disabled={isImporting}
+                class="px-3 py-2 rounded-lg text-xs font-medium border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors disabled:opacity-50"
+              >
+                {#if isImporting}
+                  Importing...
+                {:else}
+                  Import Model File
+                {/if}
+              </button>
+              <span class="text-xs text-sidecar-text-muted">
+                Have a .bin file? Import it directly.
+              </span>
+            </div>
+            {#if importError}
+              <p class="mt-2 text-xs text-sidecar-danger">{importError}</p>
+            {/if}
+            {#if importSuccess}
+              <p class="mt-2 text-xs text-sidecar-success">{importSuccess}</p>
+            {/if}
           </div>
         {/if}
 

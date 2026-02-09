@@ -1289,6 +1289,80 @@ pub async fn load_model(
     Ok(())
 }
 
+/// Import a model file from user's filesystem (manual download fallback)
+/// Copies the file to the correct models directory and loads it
+#[tauri::command]
+pub async fn import_model(
+    file_path: String,
+    model_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let source = std::path::PathBuf::from(&file_path);
+    if !source.exists() {
+        return Err("File not found".to_string());
+    }
+
+    // Validate file size (at least 10MB for any model)
+    let file_size = std::fs::metadata(&source)
+        .map(|m| m.len())
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    if file_size < 10 * 1024 * 1024 {
+        return Err(format!(
+            "File is too small ({:.1} MB). This doesn't appear to be a valid model file.",
+            file_size as f64 / (1024.0 * 1024.0)
+        ));
+    }
+
+    let model: WhisperModel = model_name.parse()
+        .map_err(|e: anyhow::Error| e.to_string())?;
+
+    let target_path = asr::get_model_path(model)
+        .map_err(|e| format!("Failed to get model path: {}", e))?;
+
+    // Handle .zip files by extracting the .bin inside
+    let is_zip = source.extension().and_then(|e| e.to_str()) == Some("zip");
+
+    if is_zip {
+        log::info!("Extracting model from zip {:?} to {:?}", source, target_path);
+        crate::models::extract_bin_from_zip(&source, &target_path)
+            .map_err(|e| format!("Failed to extract model from zip: {}", e))?;
+    } else {
+        log::info!("Importing model from {:?} to {:?} ({} bytes)", source, target_path, file_size);
+        std::fs::copy(&source, &target_path)
+            .map_err(|e| format!("Failed to copy model file: {}", e))?;
+    }
+
+    // Load the model
+    let language = {
+        let settings = state.settings.lock().await;
+        settings.language.clone()
+    };
+
+    let mut engine = TranscriptionEngine::new();
+    engine.set_language(&language);
+    engine.load_model(&target_path)
+        .map_err(|e| {
+            // Clean up if loading fails
+            let _ = std::fs::remove_file(&target_path);
+            format!("File copied but failed to load model: {}", e)
+        })?;
+
+    *state.transcription_engine.lock().await = Some(engine);
+    log::info!("Model {} imported and loaded successfully", model_name);
+    Ok(())
+}
+
+/// Get the download URL for a whisper model (for manual download)
+#[tauri::command]
+pub async fn get_model_download_url(model_name: String) -> Result<serde_json::Value, String> {
+    let model: WhisperModel = model_name.parse()
+        .map_err(|e: anyhow::Error| e.to_string())?;
+    Ok(serde_json::json!({
+        "huggingface": model.download_url(),
+        "github": model.github_release_url(),
+    }))
+}
+
 // ============================================================================
 // Audio Device Commands
 // ============================================================================

@@ -25,6 +25,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
@@ -38,6 +39,8 @@ pub fn run() {
             commands::check_model_status,
             commands::download_model,
             commands::load_model,
+            commands::import_model,
+            commands::get_model_download_url,
             commands::get_models_info,
             commands::list_audio_devices,
             commands::get_device_specs,
