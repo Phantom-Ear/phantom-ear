@@ -1,6 +1,6 @@
 import type { Theme } from '$lib/types';
 
-const STORAGE_KEY = 'phantomear-theme';
+const STORAGE_KEY = 'phantom-ear-theme';
 
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'dark';

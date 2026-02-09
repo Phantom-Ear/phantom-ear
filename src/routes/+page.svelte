@@ -664,7 +664,7 @@
 </script>
 
 {#if showSplash}
-  <div class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-sidecar-bg {splashFadingOut ? 'animate-splash-fade-out' : ''}">
+  <div class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-phantom-ear-bg {splashFadingOut ? 'animate-splash-fade-out' : ''}">
     <!-- PhantomEar Logo -->
     <div class="animate-phantom-fly">
       <img
@@ -680,7 +680,7 @@
 {#if !showSplash && needsSetup}
   <Setup onComplete={handleSetupComplete} />
 {:else if !showSplash}
-  <div class="flex h-screen bg-sidecar-bg no-select">
+  <div class="flex h-screen bg-phantom-ear-bg no-select">
     <!-- Sidebar -->
     <Sidebar
       collapsed={sidebarCollapsed}
@@ -735,7 +735,7 @@
                   </button>
                 </div>
 
-                <p class="mt-3 text-sm text-sidecar-text-muted">
+                <p class="mt-3 text-sm text-phantom-ear-text-muted">
                   Click to start recording
                 </p>
               </div>
@@ -750,23 +750,23 @@
                   class="flex items-center gap-2 group"
                 >
                   <svg
-                    class="w-4 h-4 text-sidecar-text-muted transition-transform {transcriptCollapsed ? '-rotate-90' : ''}"
+                    class="w-4 h-4 text-phantom-ear-text-muted transition-transform {transcriptCollapsed ? '-rotate-90' : ''}"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
                   >
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                   </svg>
-                  <h2 class="text-sm font-medium text-sidecar-text-muted uppercase tracking-wide">Live Transcript</h2>
+                  <h2 class="text-sm font-medium text-phantom-ear-text-muted uppercase tracking-wide">Live Transcript</h2>
                 </button>
                 <div class="flex items-center gap-2">
                   {#if transcript.length > 0}
-                    <span class="text-xs text-sidecar-text-muted">{transcript.length} segments</span>
+                    <span class="text-xs text-phantom-ear-text-muted">{transcript.length} segments</span>
                   {/if}
                   {#if transcript.length > 0 && !isRecording}
                     <button
                       onclick={handleExportMeeting}
-                      class="px-2 py-1 text-xs rounded-md bg-sidecar-surface border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-accent transition-colors"
+                      class="px-2 py-1 text-xs rounded-md bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-accent transition-colors"
                       title="Export transcript to clipboard"
                     >
                       {exportCopied ? 'Copied!' : 'Export'}
@@ -776,9 +776,9 @@
               </div>
 
               {#if !transcriptCollapsed}
-                <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-hidden shadow-glow-surface transition-all duration-200">
+                <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden shadow-glow-surface transition-all duration-200">
                   {#if transcript.length === 0 && !summary && !answer}
-                    <div class="relative flex flex-col items-center justify-center h-full text-sidecar-text-muted overflow-hidden">
+                    <div class="relative flex flex-col items-center justify-center h-full text-phantom-ear-text-muted overflow-hidden">
                       <!-- Ambient PhantomEar background -->
                       <img
                         src="/PhantomEarNoBackground.png"
@@ -793,10 +793,10 @@
                         <!-- Scramble headline -->
                         <p class="text-xl font-light tracking-wide relative z-10" aria-label="Always Listening. Never Seen.">
                           {#if scrambleComplete}
-                            <span class="text-sidecar-text">{HEADLINE}</span>
+                            <span class="text-phantom-ear-text">{HEADLINE}</span>
                           {:else}
                             {#each scrambleOutput as ch}
-                              <span class={ch.scrambled ? 'text-sidecar-purple opacity-40' : 'text-sidecar-text'}>{ch.char}</span>
+                              <span class={ch.scrambled ? 'text-phantom-ear-purple opacity-40' : 'text-phantom-ear-text'}>{ch.char}</span>
                             {/each}
                           {/if}
                         </p>
@@ -806,35 +806,35 @@
                   {:else}
                     <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
                       {#each transcript as segment (segment.id)}
-                        <div class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-sidecar-surface/50 transition-colors">
-                          <span class="text-xs text-sidecar-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
-                          <p class="text-sm leading-relaxed text-sidecar-text">{segment.text}</p>
+                        <div class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-phantom-ear-surface/50 transition-colors">
+                          <span class="text-xs text-phantom-ear-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
+                          <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
                         </div>
                       {/each}
 
                       <!-- Summary Display (inside scroll) -->
                       {#if summary}
-                        <div class="mt-4 p-4 rounded-xl bg-sidecar-purple/5 border border-sidecar-purple/20">
+                        <div class="mt-4 p-4 rounded-xl bg-phantom-ear-purple/5 border border-phantom-ear-purple/20">
                           <div class="flex items-center gap-2 mb-3">
-                            <div class="w-5 h-5 rounded-full bg-sidecar-purple flex items-center justify-center">
+                            <div class="w-5 h-5 rounded-full bg-phantom-ear-purple flex items-center justify-center">
                               <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
                             </div>
-                            <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">Meeting Summary</h3>
+                            <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Meeting Summary</h3>
                           </div>
 
                           {#if summary.overview}
-                            <p class="text-sm text-sidecar-text leading-relaxed mb-4">{summary.overview}</p>
+                            <p class="text-sm text-phantom-ear-text leading-relaxed mb-4">{summary.overview}</p>
                           {/if}
 
                           {#if summary.key_points.length > 0}
                             <div class="mb-3">
-                              <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Key Points</h4>
+                              <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Key Points</h4>
                               <ul class="space-y-1">
                                 {#each summary.key_points as point}
-                                  <li class="flex items-start gap-2 text-sm text-sidecar-text">
-                                    <span class="text-sidecar-accent mt-1">&#8226;</span>
+                                  <li class="flex items-start gap-2 text-sm text-phantom-ear-text">
+                                    <span class="text-phantom-ear-accent mt-1">&#8226;</span>
                                     <span>{point}</span>
                                   </li>
                                 {/each}
@@ -844,11 +844,11 @@
 
                           {#if summary.action_items.length > 0}
                             <div>
-                              <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Action Items</h4>
+                              <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Action Items</h4>
                               <ul class="space-y-1">
                                 {#each summary.action_items as item}
-                                  <li class="flex items-start gap-2 text-sm text-sidecar-text">
-                                    <span class="text-sidecar-success mt-1">&#10003;</span>
+                                  <li class="flex items-start gap-2 text-sm text-phantom-ear-text">
+                                    <span class="text-phantom-ear-success mt-1">&#10003;</span>
                                     <span>{item}</span>
                                   </li>
                                 {/each}
@@ -860,23 +860,23 @@
 
                       <!-- Answer Display (inside scroll) -->
                       {#if answer}
-                        <div class="mt-4 p-4 rounded-xl bg-sidecar-accent/5 border border-sidecar-accent/20">
+                        <div class="mt-4 p-4 rounded-xl bg-phantom-ear-accent/5 border border-phantom-ear-accent/20">
                           <div class="flex items-center gap-2 mb-2">
                             <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
                               <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                               </svg>
                             </div>
-                            <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">AI Answer</h3>
+                            <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">AI Answer</h3>
                           </div>
-                          <p class="text-sm text-sidecar-text whitespace-pre-wrap leading-relaxed">{answer}</p>
+                          <p class="text-sm text-phantom-ear-text whitespace-pre-wrap leading-relaxed">{answer}</p>
                         </div>
                       {/if}
                     </div>
                   {/if}
                 </div>
               {:else}
-                <div class="py-2 text-sm text-sidecar-text-muted">
+                <div class="py-2 text-sm text-phantom-ear-text-muted">
                   {transcript.length > 0 ? `${transcript.length} segments captured` : 'No transcript yet'}
                 </div>
               {/if}
@@ -896,7 +896,7 @@
                   bind:value={question}
                   placeholder="Ask a question about the meeting..."
                   disabled={transcript.length === 0}
-                  class="w-full pl-4 pr-28 py-3.5 glass border border-sidecar-border rounded-2xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="w-full pl-4 pr-28 py-3.5 glass border border-phantom-ear-border rounded-2xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <!-- Icons inside the input, right side -->
                 <div class="absolute right-2 flex items-center gap-1">
@@ -905,7 +905,7 @@
                     type="button"
                     onclick={generateSummary}
                     disabled={isGeneratingSummary || transcript.length === 0}
-                    class="p-2 rounded-lg text-sidecar-text-muted hover:text-sidecar-purple hover:bg-sidecar-surface transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-sidecar-text-muted disabled:hover:bg-transparent"
+                    class="p-2 rounded-lg text-phantom-ear-text-muted hover:text-phantom-ear-purple hover:bg-phantom-ear-surface transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-phantom-ear-text-muted disabled:hover:bg-transparent"
                     title="Generate summary"
                   >
                     {#if isGeneratingSummary}
@@ -925,7 +925,7 @@
                   <button
                     type="submit"
                     disabled={!question.trim() || isAsking || transcript.length === 0}
-                    class="p-2 rounded-xl bg-sidecar-text text-sidecar-bg hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
+                    class="p-2 rounded-xl bg-phantom-ear-text text-phantom-ear-bg hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
                     title="Send question"
                   >
                     {#if isAsking}
@@ -949,18 +949,18 @@
           <div class="flex-1 flex flex-col p-6 overflow-hidden">
             <!-- Phomy Header -->
             <div class="flex items-center gap-3 mb-4">
-              <div class="w-10 h-10 rounded-xl bg-sidecar-purple/20 flex items-center justify-center">
-                <svg class="w-5 h-5 text-sidecar-purple" fill="currentColor" viewBox="0 0 24 24">
+              <div class="w-10 h-10 rounded-xl bg-phantom-ear-purple/20 flex items-center justify-center">
+                <svg class="w-5 h-5 text-phantom-ear-purple" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                 </svg>
               </div>
               <div>
-                <h2 class="text-base font-semibold text-sidecar-text">Phomy</h2>
-                <p class="text-xs text-sidecar-text-muted">Your meeting memory</p>
+                <h2 class="text-base font-semibold text-phantom-ear-text">Phomy</h2>
+                <p class="text-xs text-phantom-ear-text-muted">Your meeting memory</p>
               </div>
               {#if embeddingDownloading}
-                <span class="ml-auto text-xs text-sidecar-text-muted flex items-center gap-1">
-                  <svg class="w-3 h-3 text-sidecar-purple opacity-50 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                <span class="ml-auto text-xs text-phantom-ear-text-muted flex items-center gap-1">
+                  <svg class="w-3 h-3 text-phantom-ear-purple opacity-50 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                   </svg>
                   Loading embeddings...
@@ -968,7 +968,7 @@
               {:else if embeddingDownloadFailed}
                 <button
                   onclick={openEmbeddingManualDownload}
-                  class="ml-auto text-xs text-sidecar-warning hover:text-sidecar-text transition-colors flex items-center gap-1"
+                  class="ml-auto text-xs text-phantom-ear-warning hover:text-phantom-ear-text transition-colors flex items-center gap-1"
                 >
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -976,16 +976,16 @@
                   Download blocked - click for manual
                 </button>
               {:else if !embeddingModelLoaded}
-                <span class="ml-auto text-xs text-sidecar-text-muted">Embedding model not loaded</span>
+                <span class="ml-auto text-xs text-phantom-ear-text-muted">Embedding model not loaded</span>
               {/if}
             </div>
 
             <!-- Chat History -->
-            <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-y-auto p-4 space-y-4">
+            <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-y-auto p-4 space-y-4">
               {#if phomyHistory.length === 0}
-                <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
-                  <div class="w-14 h-14 mb-4 rounded-2xl bg-sidecar-purple/10 flex items-center justify-center">
-                    <svg class="w-7 h-7 opacity-40 text-sidecar-purple" fill="currentColor" viewBox="0 0 24 24">
+                <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
+                  <div class="w-14 h-14 mb-4 rounded-2xl bg-phantom-ear-purple/10 flex items-center justify-center">
+                    <svg class="w-7 h-7 opacity-40 text-phantom-ear-purple" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                     </svg>
                   </div>
@@ -996,18 +996,18 @@
                 {#each phomyHistory as msg}
                   {#if msg.role === 'user'}
                     <div class="flex justify-end">
-                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-sidecar-accent text-white text-sm">
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-phantom-ear-accent text-white text-sm">
                         {msg.text}
                       </div>
                     </div>
                   {:else}
                     <div class="space-y-3">
-                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-sidecar-surface border border-sidecar-border text-sm text-sidecar-text whitespace-pre-wrap">
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-phantom-ear-surface border border-phantom-ear-border text-sm text-phantom-ear-text whitespace-pre-wrap">
                         {msg.text}
                       </div>
                       {#if msg.refs && msg.refs.length > 0}
                         <div class="space-y-2 max-w-[80%]">
-                          <p class="text-xs text-sidecar-text-muted uppercase tracking-wide font-medium">References</p>
+                          <p class="text-xs text-phantom-ear-text-muted uppercase tracking-wide font-medium">References</p>
                           {#each msg.refs.slice(0, 5) as ref}
                             <ReferenceCard result={ref} onSelect={handleSelectMeeting} />
                           {/each}
@@ -1018,8 +1018,8 @@
                 {/each}
 
                 {#if phomyIsAsking}
-                  <div class="flex items-center gap-2 px-4 py-2 text-sidecar-text-muted text-sm">
-                    <svg class="w-4 h-4 text-sidecar-purple animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                  <div class="flex items-center gap-2 px-4 py-2 text-phantom-ear-text-muted text-sm">
+                    <svg class="w-4 h-4 text-phantom-ear-purple animate-pulse" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                     </svg>
                     Thinking...
@@ -1033,7 +1033,7 @@
               <div class="flex justify-center mt-2">
                 <button
                   onclick={expandPhomyContext}
-                  class="px-3 py-1.5 text-xs rounded-lg bg-sidecar-surface border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-purple/40 transition-colors"
+                  class="px-3 py-1.5 text-xs rounded-lg bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-purple/40 transition-colors"
                 >
                   Show more context ({phomyContextLimit + 10} chunks)
                 </button>
@@ -1054,13 +1054,13 @@
                   bind:value={phomyQuestion}
                   placeholder={embeddingModelLoaded ? "Ask Phomy about your meetings..." : "Loading embedding model..."}
                   disabled={!embeddingModelLoaded}
-                  class="w-full pl-4 pr-14 py-3.5 glass border border-sidecar-border rounded-2xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-purple/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="w-full pl-4 pr-14 py-3.5 glass border border-phantom-ear-border rounded-2xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-purple/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <div class="absolute right-2">
                   <button
                     type="submit"
                     disabled={!phomyQuestion.trim() || phomyIsAsking || !embeddingModelLoaded}
-                    class="p-2 rounded-xl bg-sidecar-purple text-white hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
+                    class="p-2 rounded-xl bg-phantom-ear-purple text-white hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
                     title="Ask Phomy"
                   >
                     {#if phomyIsAsking}
@@ -1091,36 +1091,36 @@
   <!-- Download Progress Overlay -->
   {#if downloadingModel}
     <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div class="bg-sidecar-surface rounded-2xl border border-sidecar-border p-6 w-80 shadow-glow-surface">
+      <div class="bg-phantom-ear-surface rounded-2xl border border-phantom-ear-border p-6 w-80 shadow-glow-surface">
         <div class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 rounded-xl bg-sidecar-accent/20 flex items-center justify-center">
-            <svg class="w-5 h-5 text-sidecar-accent animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-10 h-10 rounded-xl bg-phantom-ear-accent/20 flex items-center justify-center">
+            <svg class="w-5 h-5 text-phantom-ear-accent animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
           </div>
           <div>
-            <h3 class="text-sm font-semibold text-sidecar-text">Downloading Model</h3>
-            <p class="text-xs text-sidecar-text-muted capitalize">{downloadingModel}</p>
+            <h3 class="text-sm font-semibold text-phantom-ear-text">Downloading Model</h3>
+            <p class="text-xs text-phantom-ear-text-muted capitalize">{downloadingModel}</p>
           </div>
         </div>
 
         {#if downloadProgress}
           <div class="space-y-2">
-            <div class="h-2 bg-sidecar-border rounded-full overflow-hidden">
+            <div class="h-2 bg-phantom-ear-border rounded-full overflow-hidden">
               <div
                 class="h-full bg-gradient-accent transition-all duration-300"
                 style="width: {downloadProgress.percentage}%"
               ></div>
             </div>
-            <div class="flex justify-between text-xs text-sidecar-text-muted">
+            <div class="flex justify-between text-xs text-phantom-ear-text-muted">
               <span>{downloadProgress.status}</span>
               <span>{downloadProgress.percentage.toFixed(0)}%</span>
             </div>
           </div>
         {:else}
           <div class="flex items-center justify-center py-2">
-            <div class="w-5 h-5 border-2 border-sidecar-accent border-t-transparent rounded-full animate-spin"></div>
-            <span class="ml-2 text-sm text-sidecar-text-muted">Preparing...</span>
+            <div class="w-5 h-5 border-2 border-phantom-ear-accent border-t-transparent rounded-full animate-spin"></div>
+            <span class="ml-2 text-sm text-phantom-ear-text-muted">Preparing...</span>
           </div>
         {/if}
       </div>
@@ -1136,22 +1136,22 @@
       role="button"
       tabindex="-1"
     ></div>
-    <div class="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[450px] glass-strong rounded-2xl border border-sidecar-border shadow-glow-surface z-50 flex flex-col overflow-hidden">
+    <div class="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[450px] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden">
       <!-- Header -->
-      <div class="flex items-center justify-between px-6 py-4 border-b border-sidecar-border/50">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-phantom-ear-border/50">
         <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-lg bg-sidecar-purple/20 flex items-center justify-center">
-            <svg class="w-4 h-4 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-8 h-8 rounded-lg bg-phantom-ear-purple/20 flex items-center justify-center">
+            <svg class="w-4 h-4 text-phantom-ear-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
           </div>
-          <h2 class="text-lg font-semibold text-sidecar-text">Manual Embedding Model Download</h2>
+          <h2 class="text-lg font-semibold text-phantom-ear-text">Manual Embedding Model Download</h2>
         </div>
         <button
           onclick={() => showEmbeddingManualDownload = false}
-          class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
+          class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors"
         >
-          <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-5 h-5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -1159,35 +1159,35 @@
 
       <!-- Content -->
       <div class="p-6 space-y-4">
-        <p class="text-sm text-sidecar-text-muted">
+        <p class="text-sm text-phantom-ear-text-muted">
           The automatic download was blocked by a corporate firewall. Download the files manually and import them below.
         </p>
 
-        <div class="bg-sidecar-surface/50 border border-sidecar-border/50 rounded-xl p-4 space-y-3">
+        <div class="bg-phantom-ear-surface/50 border border-phantom-ear-border/50 rounded-xl p-4 space-y-3">
           <div class="flex items-start gap-3">
-            <div class="w-6 h-6 rounded-full bg-sidecar-purple/20 flex items-center justify-center shrink-0 mt-0.5">
-              <span class="text-xs font-bold text-sidecar-purple">1</span>
+            <div class="w-6 h-6 rounded-full bg-phantom-ear-purple/20 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-xs font-bold text-phantom-ear-purple">1</span>
             </div>
             <div class="flex-1">
-              <p class="text-sm text-sidecar-text">Download these two files:</p>
-              <ul class="mt-2 space-y-1 text-xs text-sidecar-text-muted">
+              <p class="text-sm text-phantom-ear-text">Download these two files:</p>
+              <ul class="mt-2 space-y-1 text-xs text-phantom-ear-text-muted">
                 <li class="flex items-center gap-2">
-                  <span class="w-1.5 h-1.5 rounded-full bg-sidecar-purple"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-phantom-ear-purple"></span>
                   model.onnx (~33MB)
                 </li>
                 <li class="flex items-center gap-2">
-                  <span class="w-1.5 h-1.5 rounded-full bg-sidecar-purple"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-phantom-ear-purple"></span>
                   tokenizer.json (~700KB)
                 </li>
               </ul>
             </div>
           </div>
           <div class="flex items-start gap-3">
-            <div class="w-6 h-6 rounded-full bg-sidecar-purple/20 flex items-center justify-center shrink-0 mt-0.5">
-              <span class="text-xs font-bold text-sidecar-purple">2</span>
+            <div class="w-6 h-6 rounded-full bg-phantom-ear-purple/20 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-xs font-bold text-phantom-ear-purple">2</span>
             </div>
-            <p class="text-sm text-sidecar-text-muted text-left">
-              Click <span class="text-sidecar-text">Import Files</span> below and select both downloaded files (or a .zip containing them)
+            <p class="text-sm text-phantom-ear-text-muted text-left">
+              Click <span class="text-phantom-ear-text">Import Files</span> below and select both downloaded files (or a .zip containing them)
             </p>
           </div>
         </div>
@@ -1195,7 +1195,7 @@
         <div class="flex gap-3">
           <button
             onclick={openEmbeddingManualDownload}
-            class="flex-1 py-2.5 px-4 border border-sidecar-border rounded-xl text-sm text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors"
+            class="flex-1 py-2.5 px-4 border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-text-muted transition-colors"
           >
             Re-open Links
           </button>

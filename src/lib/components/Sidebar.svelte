@@ -49,13 +49,13 @@
 </script>
 
 <aside
-  class="flex flex-col h-full bg-sidecar-surface border-r border-sidecar-border transition-all duration-200 ease-in-out {collapsed ? 'w-16' : 'w-64'}"
+  class="flex flex-col h-full bg-phantom-ear-surface border-r border-phantom-ear-border transition-all duration-200 ease-in-out {collapsed ? 'w-16' : 'w-64'}"
 >
   <!-- Header -->
-  <div class="flex items-center gap-3 px-4 py-4 border-b border-sidecar-border/50">
+  <div class="flex items-center gap-3 px-4 py-4 border-b border-phantom-ear-border/50">
     <button
       onclick={onToggle}
-      class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors text-sidecar-text-muted"
+      class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors text-phantom-ear-text-muted"
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -63,7 +63,7 @@
       </svg>
     </button>
     {#if !collapsed}
-      <span class="font-semibold text-sidecar-text">PhantomEar</span>
+      <span class="font-semibold text-phantom-ear-text">PhantomEar</span>
     {/if}
   </div>
 
@@ -72,7 +72,7 @@
     {#each navItems as item}
       <button
         onclick={() => onNavigate(item.view)}
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {currentView === item.view ? 'bg-sidecar-accent/10 text-sidecar-accent' : 'text-sidecar-text-muted hover:bg-sidecar-surface-hover hover:text-sidecar-text'}"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {currentView === item.view ? 'bg-phantom-ear-accent/10 text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text'}"
         title={collapsed ? item.label : undefined}
       >
         {#if item.icon === 'home'}
@@ -100,7 +100,7 @@
   {#if !collapsed}
     <div class="px-3 pb-2">
       <div class="relative">
-        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <input
@@ -108,7 +108,7 @@
           placeholder="Search meetings..."
           value={localSearchQuery}
           oninput={handleSearchInput}
-          class="w-full pl-8 pr-3 py-1.5 text-xs bg-sidecar-bg border border-sidecar-border rounded-lg text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent transition-colors"
+          class="w-full pl-8 pr-3 py-1.5 text-xs bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
         />
       </div>
     </div>
@@ -119,7 +119,7 @@
     {#if pinnedMeetings.length > 0}
       <div class="mb-4">
         {#if !collapsed}
-          <h3 class="px-3 py-2 text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide">Pinned</h3>
+          <h3 class="px-3 py-2 text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide">Pinned</h3>
         {/if}
         <div class="space-y-0.5">
           {#each pinnedMeetings as meeting (meeting.id)}
@@ -140,7 +140,7 @@
     {#if recentMeetings.length > 0}
       <div>
         {#if !collapsed}
-          <h3 class="px-3 py-2 text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide">Recent</h3>
+          <h3 class="px-3 py-2 text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide">Recent</h3>
         {/if}
         <div class="space-y-0.5">
           {#each recentMeetings as meeting (meeting.id)}
@@ -160,17 +160,17 @@
 
     {#if pinnedMeetings.length === 0 && recentMeetings.length === 0 && !collapsed}
       <div class="px-3 py-4 text-center">
-        <p class="text-xs text-sidecar-text-muted">No meetings yet</p>
-        <p class="text-xs text-sidecar-text-muted mt-1">Start recording to create one</p>
+        <p class="text-xs text-phantom-ear-text-muted">No meetings yet</p>
+        <p class="text-xs text-phantom-ear-text-muted mt-1">Start recording to create one</p>
       </div>
     {/if}
   </div>
 
   <!-- Footer: Theme Toggle -->
-  <div class="px-2 py-3 border-t border-sidecar-border/50">
+  <div class="px-2 py-3 border-t border-phantom-ear-border/50">
     <button
       onclick={() => themeStore.toggleTheme()}
-      class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidecar-text-muted hover:bg-sidecar-surface-hover hover:text-sidecar-text transition-colors"
+      class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text transition-colors"
       title={collapsed ? (themeStore.theme === 'dark' ? 'Light mode' : 'Dark mode') : undefined}
     >
       {#if themeStore.theme === 'dark'}

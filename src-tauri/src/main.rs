@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    sidecar_lib::run()
+    phantom_ear_lib::run()
 }

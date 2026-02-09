@@ -3,33 +3,33 @@
 /* Theme CSS Variables */
 :root {
   /* Dark theme (default) - ChatGPT-style soft gray */
-  --sidecar-bg: #212121;
-  --sidecar-surface: #2f2f2f;
-  --sidecar-surface-hover: #3a3a3a;
-  --sidecar-border: #424242;
-  --sidecar-text: #ececec;
-  --sidecar-text-muted: #9a9a9a;
-  --sidecar-accent: #3b82f6;
-  --sidecar-accent-hover: #2563eb;
-  --sidecar-success: #22c55e;
-  --sidecar-danger: #ef4444;
-  --sidecar-warning: #f59e0b;
-  --sidecar-purple: #8b5cf6;
+  --phantom-ear-bg: #212121;
+  --phantom-ear-surface: #2f2f2f;
+  --phantom-ear-surface-hover: #3a3a3a;
+  --phantom-ear-border: #424242;
+  --phantom-ear-text: #ececec;
+  --phantom-ear-text-muted: #9a9a9a;
+  --phantom-ear-accent: #3b82f6;
+  --phantom-ear-accent-hover: #2563eb;
+  --phantom-ear-success: #22c55e;
+  --phantom-ear-danger: #ef4444;
+  --phantom-ear-warning: #f59e0b;
+  --phantom-ear-purple: #8b5cf6;
 }
 
 :root[data-theme="light"] {
-  --sidecar-bg: #ffffff;
-  --sidecar-surface: #f4f4f4;
-  --sidecar-surface-hover: #e8e8e8;
-  --sidecar-border: #e0e0e0;
-  --sidecar-text: #1a1a1a;
-  --sidecar-text-muted: #666666;
-  --sidecar-accent: #3b82f6;
-  --sidecar-accent-hover: #2563eb;
-  --sidecar-success: #16a34a;
-  --sidecar-danger: #dc2626;
-  --sidecar-warning: #d97706;
-  --sidecar-purple: #7c3aed;
+  --phantom-ear-bg: #ffffff;
+  --phantom-ear-surface: #f4f4f4;
+  --phantom-ear-surface-hover: #e8e8e8;
+  --phantom-ear-border: #e0e0e0;
+  --phantom-ear-text: #1a1a1a;
+  --phantom-ear-text-muted: #666666;
+  --phantom-ear-accent: #3b82f6;
+  --phantom-ear-accent-hover: #2563eb;
+  --phantom-ear-success: #16a34a;
+  --phantom-ear-danger: #dc2626;
+  --phantom-ear-warning: #d97706;
+  --phantom-ear-purple: #7c3aed;
 }
 
 /* Custom theme variables for Tailwind */
@@ -37,18 +37,18 @@
   --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
   /* Map CSS variables to Tailwind theme */
-  --color-sidecar-bg: var(--sidecar-bg);
-  --color-sidecar-surface: var(--sidecar-surface);
-  --color-sidecar-surface-hover: var(--sidecar-surface-hover);
-  --color-sidecar-border: var(--sidecar-border);
-  --color-sidecar-text: var(--sidecar-text);
-  --color-sidecar-text-muted: var(--sidecar-text-muted);
-  --color-sidecar-accent: var(--sidecar-accent);
-  --color-sidecar-accent-hover: var(--sidecar-accent-hover);
-  --color-sidecar-success: var(--sidecar-success);
-  --color-sidecar-danger: var(--sidecar-danger);
-  --color-sidecar-warning: var(--sidecar-warning);
-  --color-sidecar-purple: var(--sidecar-purple);
+  --color-phantom-ear-bg: var(--phantom-ear-bg);
+  --color-phantom-ear-surface: var(--phantom-ear-surface);
+  --color-phantom-ear-surface-hover: var(--phantom-ear-surface-hover);
+  --color-phantom-ear-border: var(--phantom-ear-border);
+  --color-phantom-ear-text: var(--phantom-ear-text);
+  --color-phantom-ear-text-muted: var(--phantom-ear-text-muted);
+  --color-phantom-ear-accent: var(--phantom-ear-accent);
+  --color-phantom-ear-accent-hover: var(--phantom-ear-accent-hover);
+  --color-phantom-ear-success: var(--phantom-ear-success);
+  --color-phantom-ear-danger: var(--phantom-ear-danger);
+  --color-phantom-ear-warning: var(--phantom-ear-warning);
+  --color-phantom-ear-purple: var(--phantom-ear-purple);
 }
 
 /* Global styles */
@@ -61,8 +61,8 @@ html {
 body {
   margin: 0;
   padding: 0;
-  background-color: var(--color-sidecar-bg);
-  color: var(--color-sidecar-text);
+  background-color: var(--color-phantom-ear-bg);
+  color: var(--color-phantom-ear-text);
   min-height: 100vh;
 }
 
@@ -83,12 +83,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-sidecar-border);
+  background: var(--color-phantom-ear-border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-sidecar-text-muted);
+  background: var(--color-phantom-ear-text-muted);
 }
 
 /* Recording pulse animation */

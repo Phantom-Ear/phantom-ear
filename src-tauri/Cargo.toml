@@ -1,12 +1,12 @@
 [package]
-name = "sidecar"
+name = "phantom-ear"
 version = "0.1.0"
 description = "Privacy-first desktop meeting assistant"
 authors = ["Mosaab"]
 edition = "2021"
 
 [lib]
-name = "sidecar_lib"
+name = "phantom_ear_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

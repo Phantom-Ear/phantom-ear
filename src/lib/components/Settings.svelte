@@ -141,9 +141,9 @@
 {/if}
 
 <!-- Modal / Inline Container -->
-<div class="{inline ? 'flex flex-col h-full' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-sidecar-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
+<div class="{inline ? 'flex flex-col h-full' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
   <!-- Header -->
-  <div class="flex items-center justify-between px-6 py-4 border-b border-sidecar-border/50">
+  <div class="flex items-center justify-between px-6 py-4 border-b border-phantom-ear-border/50">
     <div class="flex items-center gap-3">
       <div class="w-8 h-8 rounded-lg bg-gradient-accent flex items-center justify-center">
         <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -151,15 +151,15 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
       </div>
-      <h2 class="text-lg font-semibold text-sidecar-text">Settings</h2>
+      <h2 class="text-lg font-semibold text-phantom-ear-text">Settings</h2>
     </div>
     {#if !inline}
       <button
         onclick={onClose}
-        class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
+        class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors"
         title="Close settings"
       >
-        <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
@@ -168,14 +168,14 @@
 
   {#if isLoading}
     <div class="flex-1 flex items-center justify-center py-12">
-      <div class="w-8 h-8 border-2 border-sidecar-accent border-t-transparent rounded-full animate-spin"></div>
+      <div class="w-8 h-8 border-2 border-phantom-ear-accent border-t-transparent rounded-full animate-spin"></div>
     </div>
   {:else}
     <!-- Tabs -->
-    <div class="flex border-b border-sidecar-border/50 px-2">
+    <div class="flex border-b border-phantom-ear-border/50 px-2">
       <button
         onclick={() => activeTab = "general"}
-        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-sidecar-accent' : 'text-sidecar-text-muted hover:text-sidecar-text'}"
+        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:text-phantom-ear-text'}"
       >
         <span class="relative z-10 flex items-center justify-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -189,7 +189,7 @@
       </button>
       <button
         onclick={() => activeTab = "llm"}
-        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'llm' ? 'text-sidecar-accent' : 'text-sidecar-text-muted hover:text-sidecar-text'}"
+        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'llm' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:text-phantom-ear-text'}"
       >
         <span class="relative z-10 flex items-center justify-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -208,32 +208,32 @@
       {#if activeTab === "general"}
         <!-- Language -->
         <div>
-          <label class="block text-sm font-medium text-sidecar-text mb-2">
+          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
             Transcription Language
           </label>
           <select
             bind:value={settings.language}
-            class="w-full px-4 py-3 bg-sidecar-bg border border-sidecar-border rounded-xl text-sm text-sidecar-text focus:outline-none focus:border-sidecar-accent transition-colors"
+            class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text focus:outline-none focus:border-phantom-ear-accent transition-colors"
           >
             {#each languages as lang}
               <option value={lang.code}>{lang.name}</option>
             {/each}
           </select>
-          <p class="mt-1 text-xs text-sidecar-text-muted">
+          <p class="mt-1 text-xs text-phantom-ear-text-muted">
             Choose "Auto-detect" if speakers use multiple languages
           </p>
         </div>
 
         <!-- ASR Backend -->
         <div>
-          <label class="block text-sm font-medium text-sidecar-text mb-2">
+          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
             Speech Recognition Engine
           </label>
           <div class="space-y-2">
             {#each asrBackends as backend}
               {@const isParakeet = backend.backend_type === "parakeet"}
               <label
-                class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.asr_backend === backend.backend_type ? 'border-sidecar-accent bg-sidecar-accent/10' : 'border-sidecar-border hover:border-sidecar-text-muted'} {isParakeet ? 'opacity-60' : ''}"
+                class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.asr_backend === backend.backend_type ? 'border-phantom-ear-accent bg-phantom-ear-accent/10' : 'border-phantom-ear-border hover:border-phantom-ear-text-muted'} {isParakeet ? 'opacity-60' : ''}"
               >
                 <input
                   type="radio"
@@ -245,16 +245,16 @@
                 />
                 <div class="flex-1">
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-sidecar-text">{backend.name}</span>
+                    <span class="text-sm font-medium text-phantom-ear-text">{backend.name}</span>
                     {#if isParakeet}
-                      <span class="text-xs px-2 py-0.5 rounded-full bg-sidecar-warning/20 text-sidecar-warning">Coming Soon</span>
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-phantom-ear-warning/20 text-phantom-ear-warning">Coming Soon</span>
                     {/if}
                   </div>
-                  <p class="text-xs text-sidecar-text-muted mt-0.5">{backend.description}</p>
+                  <p class="text-xs text-phantom-ear-text-muted mt-0.5">{backend.description}</p>
                 </div>
-                <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.asr_backend === backend.backend_type ? 'border-sidecar-accent' : 'border-sidecar-border'}">
+                <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.asr_backend === backend.backend_type ? 'border-phantom-ear-accent' : 'border-phantom-ear-border'}">
                   {#if settings.asr_backend === backend.backend_type}
-                    <div class="w-2 h-2 rounded-full bg-sidecar-accent"></div>
+                    <div class="w-2 h-2 rounded-full bg-phantom-ear-accent"></div>
                   {/if}
                 </div>
               </label>
@@ -265,13 +265,13 @@
         <!-- Whisper Model (only show when Whisper is selected) -->
         {#if settings.asr_backend === "whisper"}
           <div>
-            <label class="block text-sm font-medium text-sidecar-text mb-2">
+            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
               Whisper Model
             </label>
             <div class="space-y-2">
               {#each models as model}
                 <label
-                  class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.whisper_model === model.name ? 'border-sidecar-accent bg-sidecar-accent/10' : 'border-sidecar-border hover:border-sidecar-text-muted'}"
+                  class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.whisper_model === model.name ? 'border-phantom-ear-accent bg-phantom-ear-accent/10' : 'border-phantom-ear-border hover:border-phantom-ear-text-muted'}"
                 >
                   <input
                     type="radio"
@@ -282,17 +282,17 @@
                   />
                   <div class="flex-1">
                     <div class="flex items-center gap-2">
-                      <span class="text-sm font-medium text-sidecar-text capitalize">{model.name}</span>
-                      <span class="text-xs text-sidecar-text-muted">{model.size_mb} MB</span>
+                      <span class="text-sm font-medium text-phantom-ear-text capitalize">{model.name}</span>
+                      <span class="text-xs text-phantom-ear-text-muted">{model.size_mb} MB</span>
                       {#if model.downloaded}
-                        <span class="text-xs text-sidecar-success">Downloaded</span>
+                        <span class="text-xs text-phantom-ear-success">Downloaded</span>
                       {/if}
                     </div>
-                    <p class="text-xs text-sidecar-text-muted mt-0.5">{model.description}</p>
+                    <p class="text-xs text-phantom-ear-text-muted mt-0.5">{model.description}</p>
                   </div>
-                  <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.whisper_model === model.name ? 'border-sidecar-accent' : 'border-sidecar-border'}">
+                  <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.whisper_model === model.name ? 'border-phantom-ear-accent' : 'border-phantom-ear-border'}">
                     {#if settings.whisper_model === model.name}
-                      <div class="w-2 h-2 rounded-full bg-sidecar-accent"></div>
+                      <div class="w-2 h-2 rounded-full bg-phantom-ear-accent"></div>
                     {/if}
                   </div>
                 </label>
@@ -304,7 +304,7 @@
               <button
                 onclick={importModelFile}
                 disabled={isImporting}
-                class="px-3 py-2 rounded-lg text-xs font-medium border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors disabled:opacity-50"
+                class="px-3 py-2 rounded-lg text-xs font-medium border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-text-muted transition-colors disabled:opacity-50"
               >
                 {#if isImporting}
                   Importing...
@@ -312,15 +312,15 @@
                   Import Model File
                 {/if}
               </button>
-              <span class="text-xs text-sidecar-text-muted">
+              <span class="text-xs text-phantom-ear-text-muted">
                 Have a .bin file? Import it directly.
               </span>
             </div>
             {#if importError}
-              <p class="mt-2 text-xs text-sidecar-danger">{importError}</p>
+              <p class="mt-2 text-xs text-phantom-ear-danger">{importError}</p>
             {/if}
             {#if importSuccess}
-              <p class="mt-2 text-xs text-sidecar-success">{importSuccess}</p>
+              <p class="mt-2 text-xs text-phantom-ear-success">{importSuccess}</p>
             {/if}
           </div>
         {/if}
@@ -328,19 +328,19 @@
       {:else if activeTab === "llm"}
         <!-- LLM Provider -->
         <div>
-          <label class="block text-sm font-medium text-sidecar-text mb-2">
+          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
             LLM Provider
           </label>
           <div class="flex gap-2">
             <button
               onclick={() => settings.llm_provider = "ollama"}
-              class="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-colors {settings.llm_provider === 'ollama' ? 'bg-sidecar-accent text-white' : 'bg-sidecar-bg border border-sidecar-border text-sidecar-text hover:border-sidecar-text-muted'}"
+              class="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-colors {settings.llm_provider === 'ollama' ? 'bg-phantom-ear-accent text-white' : 'bg-phantom-ear-bg border border-phantom-ear-border text-phantom-ear-text hover:border-phantom-ear-text-muted'}"
             >
               Ollama (Local)
             </button>
             <button
               onclick={() => settings.llm_provider = "openai"}
-              class="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-colors {settings.llm_provider === 'openai' ? 'bg-sidecar-accent text-white' : 'bg-sidecar-bg border border-sidecar-border text-sidecar-text hover:border-sidecar-text-muted'}"
+              class="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-colors {settings.llm_provider === 'openai' ? 'bg-phantom-ear-accent text-white' : 'bg-phantom-ear-bg border border-phantom-ear-border text-phantom-ear-text hover:border-phantom-ear-text-muted'}"
             >
               OpenAI
             </button>
@@ -350,45 +350,45 @@
         {#if settings.llm_provider === "ollama"}
           <!-- Ollama URL -->
           <div>
-            <label class="block text-sm font-medium text-sidecar-text mb-2">
+            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
               Ollama URL
             </label>
             <input
               type="text"
               bind:value={settings.ollama_url}
               placeholder="http://localhost:11434"
-              class="w-full px-4 py-3 bg-sidecar-bg border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent transition-colors"
+              class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
             />
           </div>
 
           <!-- Ollama Model -->
           <div>
-            <label class="block text-sm font-medium text-sidecar-text mb-2">
+            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
               Model Name
             </label>
             <input
               type="text"
               bind:value={settings.ollama_model}
               placeholder="llama3.2"
-              class="w-full px-4 py-3 bg-sidecar-bg border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent transition-colors"
+              class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
             />
-            <p class="mt-1 text-xs text-sidecar-text-muted">
-              Make sure the model is pulled: <code class="text-sidecar-accent">ollama pull llama3.2</code>
+            <p class="mt-1 text-xs text-phantom-ear-text-muted">
+              Make sure the model is pulled: <code class="text-phantom-ear-accent">ollama pull llama3.2</code>
             </p>
           </div>
         {:else}
           <!-- OpenAI API Key -->
           <div>
-            <label class="block text-sm font-medium text-sidecar-text mb-2">
+            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
               OpenAI API Key
             </label>
             <input
               type="password"
               bind:value={settings.openai_api_key}
               placeholder="sk-..."
-              class="w-full px-4 py-3 bg-sidecar-bg border border-sidecar-border rounded-xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent transition-colors"
+              class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
             />
-            <p class="mt-1 text-xs text-sidecar-text-muted">
+            <p class="mt-1 text-xs text-phantom-ear-text-muted">
               Your API key is stored locally and never shared
             </p>
           </div>
@@ -397,11 +397,11 @@
     </div>
 
     <!-- Footer -->
-    <div class="flex justify-end gap-3 px-6 py-4 border-t border-sidecar-border/50">
+    <div class="flex justify-end gap-3 px-6 py-4 border-t border-phantom-ear-border/50">
       {#if !inline}
         <button
           onclick={onClose}
-          class="px-4 py-2.5 rounded-xl text-sm font-medium text-sidecar-text-muted hover:text-sidecar-text hover:bg-sidecar-surface transition-colors"
+          class="px-4 py-2.5 rounded-xl text-sm font-medium text-phantom-ear-text-muted hover:text-phantom-ear-text hover:bg-phantom-ear-surface transition-colors"
         >
           Cancel
         </button>
