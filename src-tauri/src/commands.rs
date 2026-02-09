@@ -1107,19 +1107,52 @@ pub async fn save_settings(
 // ============================================================================
 
 /// Check if required ML models are downloaded
+/// Checks ALL whisper models — returns the first downloaded one found
 #[tauri::command]
-pub async fn check_model_status() -> Result<ModelStatus, String> {
-    let model = WhisperModel::Small;
-    let downloaded = asr::is_model_downloaded(model)
-        .map_err(|e| format!("Failed to check model: {}", e))?;
+pub async fn check_model_status(
+    state: State<'_, AppState>,
+) -> Result<ModelStatus, String> {
+    let settings = state.settings.lock().await;
+    let configured_model_name = settings.whisper_model.clone();
+    drop(settings);
+
+    // First check the configured model
+    let configured: WhisperModel = configured_model_name.parse()
+        .unwrap_or(WhisperModel::Small);
 
     let models_dir = asr::get_models_dir()
         .map_err(|e| format!("Failed to get models dir: {}", e))?;
 
+    if asr::is_model_downloaded(configured).unwrap_or(false) {
+        return Ok(ModelStatus {
+            whisper_downloaded: true,
+            whisper_model: configured_model_name,
+            whisper_size_mb: configured.size_mb(),
+            models_dir: models_dir.to_string_lossy().to_string(),
+        });
+    }
+
+    // Fallback: check if ANY model is downloaded
+    let all_models = [
+        WhisperModel::Tiny, WhisperModel::Base, WhisperModel::Small,
+        WhisperModel::Medium, WhisperModel::Large,
+    ];
+    for model in all_models {
+        if asr::is_model_downloaded(model).unwrap_or(false) {
+            let name = format!("{:?}", model).to_lowercase();
+            return Ok(ModelStatus {
+                whisper_downloaded: true,
+                whisper_model: name,
+                whisper_size_mb: model.size_mb(),
+                models_dir: models_dir.to_string_lossy().to_string(),
+            });
+        }
+    }
+
     Ok(ModelStatus {
-        whisper_downloaded: downloaded,
-        whisper_model: "small".to_string(),
-        whisper_size_mb: model.size_mb(),
+        whisper_downloaded: false,
+        whisper_model: configured_model_name,
+        whisper_size_mb: configured.size_mb(),
         models_dir: models_dir.to_string_lossy().to_string(),
     })
 }
