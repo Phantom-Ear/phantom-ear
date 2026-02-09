@@ -49,11 +49,12 @@ impl WhisperModel {
         }
     }
 
-    /// GitHub Releases fallback URL (zipped model)
+    /// GitHub Releases fallback URL (zipped model from dedicated "models" release)
     pub fn github_release_url(&self) -> String {
         format!(
-            "https://github.com/Phantom-Ear/phantom-ear/releases/latest/download/{}.zip",
+            "https://github.com/Phantom-Ear/phantom-ear/releases/download/models/{}.zip",
             self.filename().trim_end_matches(".bin")
+            
         )
     }
 

@@ -48,3 +48,6 @@ coverage/
 # Misc
 .cache/
 *.local
+
+*.bin
+*.zip
