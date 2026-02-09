@@ -9,7 +9,7 @@ dist/
 
 # Rust / Tauri
 src-tauri/target/
-
+notes.txt
 # Environment and secrets
 .env
 .env.*
