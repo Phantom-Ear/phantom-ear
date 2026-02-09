@@ -65,6 +65,7 @@ pub fn run() {
             commands::is_embedding_model_downloaded,
             commands::get_embedding_model_download_urls,
             commands::import_embedding_model,
+            commands::get_audio_level,
         ])
         .setup(|app| {
             // Get app data directory and create DB synchronously

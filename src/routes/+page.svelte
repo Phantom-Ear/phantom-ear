@@ -7,7 +7,10 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
   import ReferenceCard from "$lib/components/ReferenceCard.svelte";
+  import SearchOverlay from "$lib/components/SearchOverlay.svelte";
+  import TranscriptTimeline from "$lib/components/TranscriptTimeline.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
+  import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
   import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult } from "$lib/types";
 
   interface DownloadProgress {
@@ -80,6 +83,12 @@
   let scrambleComplete = $state(false);
   let scrambleStarted = false;
 
+  // Search overlay state
+  let showSearchOverlay = $state(false);
+
+  // Keyboard shortcut state
+  let sidebarFocused = $state(false);
+
   const languageNames: Record<string, string> = {
     auto: "Auto-detect",
     en: "English",
@@ -144,6 +153,9 @@
     isLoading = false;
     // Wait for both loading AND animation to complete before hiding splash
     waitForSplashEnd();
+
+    // Register global keyboard shortcuts
+    window.addEventListener('keydown', handleGlobalKeydown);
   });
 
   // Splash: logo fly-in (0.6s) + hold (0.6s) = ~1.2s minimum
@@ -188,7 +200,54 @@
     if (unlistenDownload) {
       unlistenDownload();
     }
+    // Remove keyboard event listener
+    window.removeEventListener('keydown', handleGlobalKeydown);
   });
+
+  // Global keyboard shortcut handler
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Skip if we're in an input field or textarea
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      // Except for Escape key
+      if (e.key === 'Escape') {
+        (target as HTMLInputElement | HTMLTextAreaElement).blur();
+      }
+      return;
+    }
+
+    // Cmd/Ctrl + Shift + R: Toggle Recording
+    const cmdKey = isMacOS() ? e.metaKey : e.ctrlKey;
+    if (cmdKey && e.shiftKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault();
+      if (!needsSetup && !isLoading) {
+        toggleRecording();
+      }
+      return;
+    }
+
+    // Cmd/Ctrl + K: Quick Search
+    if (cmdKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      showSearchOverlay = true;
+      return;
+    }
+
+    // Cmd/Ctrl + B: Toggle Sidebar
+    if (cmdKey && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      sidebarCollapsed = !sidebarCollapsed;
+      return;
+    }
+
+    // Escape: Close search overlay
+    if (e.key === 'Escape') {
+      if (showSearchOverlay) {
+        showSearchOverlay = false;
+      }
+      return;
+    }
+  }
 
   // Format milliseconds to MM:SS
   function formatTimeMs(ms: number): string {
@@ -695,6 +754,7 @@
       onTogglePinMeeting={(id) => meetingsStore.togglePin(id)}
       onDeleteMeeting={(id) => meetingsStore.deleteMeeting(id)}
       onSearch={handleSearch}
+      onOpenSearchOverlay={() => showSearchOverlay = true}
     />
 
     <!-- Main Content -->
@@ -738,6 +798,35 @@
                 <p class="mt-3 text-sm text-phantom-ear-text-muted">
                   Click to start recording
                 </p>
+              </div>
+            {/if}
+
+            <!-- Timeline (show when recording) -->
+            {#if isRecording}
+              <div class="mb-4">
+                <TranscriptTimeline
+                  segments={transcript}
+                  duration={recordingDuration}
+                  currentPosition={recordingDuration}
+                  isRecording={isRecording}
+                  onSeek={(timestampMs) => {
+                    // For now, just scroll to the segment closest to this timestamp
+                    const targetSec = timestampMs / 1000;
+                    const closestSegment = transcript.reduce((prev, curr) => {
+                      const prevDiff = Math.abs((prev.timestamp_ms || 0) / 1000 - targetSec);
+                      const currDiff = Math.abs((curr.timestamp_ms || 0) / 1000 - targetSec);
+                      return currDiff < prevDiff ? curr : prev;
+                    }, transcript[0]);
+                    if (closestSegment && transcriptContainer) {
+                      const segmentEl = transcriptContainer.querySelector(`[data-segment-id="${closestSegment.id}"]`);
+                      if (segmentEl) {
+                        segmentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        segmentEl.classList.add('bg-phantom-ear-accent/10');
+                        setTimeout(() => segmentEl.classList.remove('bg-phantom-ear-accent/10'), 1500);
+                      }
+                    }
+                  }}
+                />
               </div>
             {/if}
 
@@ -806,7 +895,7 @@
                   {:else}
                     <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
                       {#each transcript as segment (segment.id)}
-                        <div class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-phantom-ear-surface/50 transition-colors">
+                        <div data-segment-id={segment.id} class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-phantom-ear-surface/50 transition-colors">
                           <span class="text-xs text-phantom-ear-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
                           <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
                         </div>
@@ -1215,3 +1304,9 @@
     </div>
   {/if}
 {/if}
+
+<!-- Search Overlay -->
+<SearchOverlay 
+  isOpen={showSearchOverlay} 
+  onClose={() => showSearchOverlay = false} 
+/>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ModelInfo } from '$lib/types';
+  import AudioLevelIndicator from './AudioLevelIndicator.svelte';
 
   let {
     language = 'en',
@@ -100,13 +101,9 @@
         </span>
       </div>
 
-      <!-- Audio waveform bars -->
+      <!-- Audio level indicator -->
       {#if !isPaused}
-        <div class="flex items-center gap-0.5 h-5">
-          <div class="w-1 bg-phantom-ear-danger rounded-full audio-bar" style="animation-delay: 0s"></div>
-          <div class="w-1 bg-phantom-ear-danger rounded-full audio-bar" style="animation-delay: 0.15s"></div>
-          <div class="w-1 bg-phantom-ear-danger rounded-full audio-bar" style="animation-delay: 0.3s"></div>
-        </div>
+        <AudioLevelIndicator />
       {/if}
 
       <!-- Pause/Resume button -->

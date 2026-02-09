@@ -4,6 +4,7 @@
   let {
     meeting,
     isActive = false,
+    isKeyboardSelected = false,
     collapsed = false,
     onSelect,
     onRename,
@@ -12,6 +13,7 @@
   }: {
     meeting: MeetingListItem;
     isActive?: boolean;
+    isKeyboardSelected?: boolean;
     collapsed?: boolean;
     onSelect: () => void;
     onRename: (newTitle: string) => void;
@@ -51,7 +53,7 @@
 </script>
 
 <div
-  class="group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors {isActive ? 'bg-phantom-ear-surface-hover' : 'hover:bg-phantom-ear-surface'}"
+  class="group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors {isActive ? 'bg-phantom-ear-surface-hover' : 'hover:bg-phantom-ear-surface'} {isKeyboardSelected ? 'meeting-item-selected ring-2 ring-phantom-ear-accent ring-inset' : ''}"
   onclick={onSelect}
   onkeydown={(e) => e.key === 'Enter' && onSelect()}
   role="button"

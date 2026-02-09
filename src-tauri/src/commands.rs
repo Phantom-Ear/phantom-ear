@@ -1573,3 +1573,13 @@ pub async fn import_embedding_model(
     log::info!("Embedding model imported and loaded successfully");
     Ok(())
 }
+
+/// Get current audio level (RMS) for visualization
+#[tauri::command]
+pub async fn get_audio_level(state: State<'_, AppState>) -> Result<f32, String> {
+    let audio = state.audio_capture.lock().await;
+    match audio.as_ref() {
+        Some(capture) => Ok(capture.get_rms_level()),
+        None => Ok(0.0),
+    }
+}
