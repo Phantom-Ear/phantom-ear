@@ -63,6 +63,9 @@
   // Embedding state
   let embeddingModelLoaded = $state(false);
   let embeddingDownloading = $state(false);
+  let embeddingDownloadFailed = $state(false);
+  let showEmbeddingManualDownload = $state(false);
+  let embeddingImporting = $state(false);
 
   // Export state
   let exportCopied = $state(false);
@@ -353,6 +356,7 @@
       } else {
         // Auto-download in background
         embeddingDownloading = true;
+        embeddingDownloadFailed = false;
         await invoke("download_embedding_model_cmd");
         embeddingModelLoaded = true;
         embeddingDownloading = false;
@@ -361,7 +365,66 @@
     } catch (e) {
       console.error("Embedding model init failed:", e);
       embeddingDownloading = false;
+      const errMsg = String(e);
+      if (errMsg.includes("too small") || errMsg.includes("firewall") || errMsg.includes("proxy") || errMsg.includes("blocked")) {
+        embeddingDownloadFailed = true;
+      }
     }
+  }
+
+  async function openEmbeddingManualDownload() {
+    showEmbeddingManualDownload = true;
+    embeddingDownloadFailed = false;
+
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      const urls = await invoke<{ model_url: string; tokenizer_url: string }>("get_embedding_model_download_urls");
+      // Open both URLs in browser - user needs to download both files
+      await openUrl(urls.model_url);
+      // Small delay before opening second URL
+      setTimeout(async () => {
+        await openUrl(urls.tokenizer_url);
+      }, 500);
+    } catch (e) {
+      console.error("Failed to open download links:", e);
+    }
+  }
+
+  async function importEmbeddingModel() {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    
+    embeddingImporting = true;
+    try {
+      const selected = await open({
+        title: "Select embedding model file (model.onnx, tokenizer.json, or .zip)",
+        filters: [
+          { name: "Model files", extensions: ["onnx", "json", "zip"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+        multiple: true,
+      });
+
+      if (!selected) {
+        embeddingImporting = false;
+        return;
+      }
+
+      const files = Array.isArray(selected) ? selected : [selected];
+
+      // Import each selected file
+      for (const filePath of files) {
+        await invoke("import_embedding_model", { filePath: filePath });
+      }
+
+      // Load the model after import
+      await invoke("load_embedding_model");
+      embeddingModelLoaded = true;
+      showEmbeddingManualDownload = false;
+      console.log("Embedding model imported and loaded");
+    } catch (e) {
+      console.error("Embedding model import failed:", e);
+    }
+    embeddingImporting = false;
   }
 
   async function askPhomy() {
@@ -902,6 +965,16 @@
                   </svg>
                   Loading embeddings...
                 </span>
+              {:else if embeddingDownloadFailed}
+                <button
+                  onclick={openEmbeddingManualDownload}
+                  class="ml-auto text-xs text-sidecar-warning hover:text-sidecar-text transition-colors flex items-center gap-1"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  Download blocked - click for manual
+                </button>
               {:else if !embeddingModelLoaded}
                 <span class="ml-auto text-xs text-sidecar-text-muted">Embedding model not loaded</span>
               {/if}
@@ -1050,6 +1123,94 @@
             <span class="ml-2 text-sm text-sidecar-text-muted">Preparing...</span>
           </div>
         {/if}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Embedding Model Manual Download Modal -->
+  {#if showEmbeddingManualDownload}
+    <div
+      class="fixed inset-0 bg-black/70 backdrop-blur-md z-40"
+      onclick={() => showEmbeddingManualDownload = false}
+      onkeydown={(e) => e.key === "Escape" && (showEmbeddingManualDownload = false)}
+      role="button"
+      tabindex="-1"
+    ></div>
+    <div class="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[450px] glass-strong rounded-2xl border border-sidecar-border shadow-glow-surface z-50 flex flex-col overflow-hidden">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-sidecar-border/50">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-sidecar-purple/20 flex items-center justify-center">
+            <svg class="w-4 h-4 text-sidecar-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </div>
+          <h2 class="text-lg font-semibold text-sidecar-text">Manual Embedding Model Download</h2>
+        </div>
+        <button
+          onclick={() => showEmbeddingManualDownload = false}
+          class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors"
+        >
+          <svg class="w-5 h-5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="p-6 space-y-4">
+        <p class="text-sm text-sidecar-text-muted">
+          The automatic download was blocked by a corporate firewall. Download the files manually and import them below.
+        </p>
+
+        <div class="bg-sidecar-surface/50 border border-sidecar-border/50 rounded-xl p-4 space-y-3">
+          <div class="flex items-start gap-3">
+            <div class="w-6 h-6 rounded-full bg-sidecar-purple/20 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-xs font-bold text-sidecar-purple">1</span>
+            </div>
+            <div class="flex-1">
+              <p class="text-sm text-sidecar-text">Download these two files:</p>
+              <ul class="mt-2 space-y-1 text-xs text-sidecar-text-muted">
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-sidecar-purple"></span>
+                  model.onnx (~33MB)
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-sidecar-purple"></span>
+                  tokenizer.json (~700KB)
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="flex items-start gap-3">
+            <div class="w-6 h-6 rounded-full bg-sidecar-purple/20 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-xs font-bold text-sidecar-purple">2</span>
+            </div>
+            <p class="text-sm text-sidecar-text-muted text-left">
+              Click <span class="text-sidecar-text">Import Files</span> below and select both downloaded files (or a .zip containing them)
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <button
+            onclick={openEmbeddingManualDownload}
+            class="flex-1 py-2.5 px-4 border border-sidecar-border rounded-xl text-sm text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors"
+          >
+            Re-open Links
+          </button>
+          <button
+            onclick={importEmbeddingModel}
+            disabled={embeddingImporting}
+            class="flex-1 py-2.5 px-4 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift btn-shine disabled:opacity-50"
+          >
+            {#if embeddingImporting}
+              Importing...
+            {:else}
+              Import Files
+            {/if}
+          </button>
+        </div>
       </div>
     </div>
   {/if}

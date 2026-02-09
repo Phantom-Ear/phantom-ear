@@ -1536,3 +1536,40 @@ pub async fn get_embedding_status(
 pub async fn is_embedding_model_downloaded() -> Result<bool, String> {
     Ok(models::is_embedding_model_downloaded())
 }
+
+/// Get download URLs for manual embedding model download
+#[tauri::command]
+pub fn get_embedding_model_download_urls() -> Result<EmbeddingModelUrls, String> {
+    let (model_url, tokenizer_url) = models::get_embedding_model_download_urls();
+    Ok(EmbeddingModelUrls {
+        model_url,
+        tokenizer_url,
+    })
+}
+
+/// URLs for manual embedding model download
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EmbeddingModelUrls {
+    pub model_url: String,
+    pub tokenizer_url: String,
+}
+
+/// Import embedding model from manually downloaded files
+#[tauri::command]
+pub async fn import_embedding_model(
+    file_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let source_path = std::path::PathBuf::from(&file_path);
+    
+    let model_dir = models::import_embedding_model(&source_path)
+        .map_err(|e| format!("Import failed: {}", e))?;
+
+    // Load the model after successful import
+    let model = EmbeddingModel::load(&model_dir)
+        .map_err(|e| format!("Failed to load embedding model: {}", e))?;
+
+    *state.embedding_model.lock().await = Some(model);
+    log::info!("Embedding model imported and loaded successfully");
+    Ok(())
+}

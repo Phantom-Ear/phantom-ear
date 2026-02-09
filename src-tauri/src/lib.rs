@@ -63,6 +63,8 @@ pub fn run() {
             commands::embed_meeting,
             commands::get_embedding_status,
             commands::is_embedding_model_downloaded,
+            commands::get_embedding_model_download_urls,
+            commands::import_embedding_model,
         ])
         .setup(|app| {
             // Get app data directory and create DB synchronously
