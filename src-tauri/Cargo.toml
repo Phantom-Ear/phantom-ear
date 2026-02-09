@@ -73,6 +73,7 @@ async-trait = "0.1"
 # Progress tracking
 indicatif = "0.17"
 tauri-plugin-dialog = "2.6.0"
+zip = "2"
 
 [features]
 default = []

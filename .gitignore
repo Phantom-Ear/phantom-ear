@@ -31,7 +31,7 @@ Thumbs.db
 npm-debug.log*
 
 # ML Models (downloaded at runtime)
-models/
+/models/
 
 # SQLite database
 *.db

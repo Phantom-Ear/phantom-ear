@@ -105,7 +105,7 @@
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: "Whisper Model", extensions: ["bin"] }],
+        filters: [{ name: "Whisper Model", extensions: ["bin", "zip"] }],
       });
       if (!selected) return;
 

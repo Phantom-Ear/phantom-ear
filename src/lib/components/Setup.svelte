@@ -124,8 +124,9 @@
     error = "";
 
     try {
-      const url = await invoke<string>("get_model_download_url", { modelName: selectedModel });
-      await openUrl(url);
+      const urls = await invoke<{ huggingface: string; github: string }>("get_model_download_url", { modelName: selectedModel });
+      // Open GitHub release (zip) — more likely to work on restricted networks
+      await openUrl(urls.github);
     } catch (e) {
       error = `Failed to open download link: ${e}`;
     }
@@ -138,7 +139,7 @@
     try {
       const selected = await open({
         title: "Select downloaded model file",
-        filters: [{ name: "Model files", extensions: ["bin"] }],
+        filters: [{ name: "Model files", extensions: ["bin", "zip"] }],
         multiple: false,
       });
 
@@ -251,7 +252,7 @@
                 <span class="text-xs font-bold text-sidecar-accent">1</span>
               </div>
               <p class="text-sm text-sidecar-text-muted text-left">
-                Wait for the <span class="text-sidecar-text">.bin</span> file to finish downloading in your browser (~1 min)
+                Wait for the <span class="text-sidecar-text">.zip</span> file to finish downloading in your browser (~1 min)
               </p>
             </div>
             <div class="flex items-start gap-3 mt-3">
@@ -259,7 +260,7 @@
                 <span class="text-xs font-bold text-sidecar-accent">2</span>
               </div>
               <p class="text-sm text-sidecar-text-muted text-left">
-                Click <span class="text-sidecar-text">Import Model</span> below and select the downloaded file
+                Click <span class="text-sidecar-text">Import Model</span> below and select the downloaded .zip or .bin file
               </p>
             </div>
           </div>

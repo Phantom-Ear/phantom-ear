@@ -107,12 +107,10 @@ pub async fn download_model(
     let expected_min = model.size_mb() * 1024 * 1024 * 8 / 10; // at least 80% of expected size
     if file_size < expected_min {
         let _ = tokio::fs::remove_file(&temp_path).await;
-        emit_progress(app, &model_name, 0, 0, 0.0, DownloadStatus::Failed);
-        return Err(anyhow!(
-            "Downloaded file is too small ({:.1} MB, expected ~{} MB). This may be caused by a corporate firewall or proxy blocking the download. Try downloading on a different network.",
-            file_size as f64 / (1024.0 * 1024.0),
-            model.size_mb()
-        ));
+        log::warn!("HuggingFace download too small ({} bytes), trying GitHub Releases fallback...", file_size);
+
+        // Fallback to GitHub Releases (zipped model)
+        return download_from_github_fallback(app, model).await;
     }
 
     // Rename temp file to final path
@@ -122,6 +120,115 @@ pub async fn download_model(
     emit_progress(app, &model_name, total_size, total_size, 100.0, DownloadStatus::Completed);
 
     Ok(model_path)
+}
+
+/// Fallback: download zipped model from GitHub Releases and extract
+async fn download_from_github_fallback(
+    app: &AppHandle,
+    model: WhisperModel,
+) -> Result<PathBuf> {
+    let model_path = get_model_path(model)?;
+    let model_name = format!("{:?}", model);
+    let github_url = model.github_release_url();
+
+    log::info!("Trying GitHub Releases fallback: {}", github_url);
+    emit_progress(app, &model_name, 0, model.size_mb() * 1024 * 1024, 0.0, DownloadStatus::Starting);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3600))
+        .build()?;
+
+    let response = client.get(&github_url).send().await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        emit_progress(app, &model_name, 0, 0, 0.0, DownloadStatus::Failed);
+        return Err(anyhow!(
+            "Download failed from both HuggingFace and GitHub (status: {}). This may be caused by a corporate firewall. Try the manual download option.",
+            status
+        ));
+    }
+
+    let total_size = response.content_length().unwrap_or(model.size_mb() * 1024 * 1024);
+
+    let models_dir = get_models_dir()?;
+    std::fs::create_dir_all(&models_dir)?;
+
+    let zip_path = model_path.with_extension("zip.tmp");
+    let mut file = tokio::fs::File::create(&zip_path).await?;
+
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+    let mut last_progress_update = std::time::Instant::now();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk).await?;
+        downloaded += chunk.len() as u64;
+
+        if last_progress_update.elapsed() >= std::time::Duration::from_millis(100) {
+            let percentage = (downloaded as f32 / total_size as f32) * 90.0; // 90% for download, 10% for extract
+            emit_progress(app, &model_name, downloaded, total_size, percentage, DownloadStatus::Downloading);
+            last_progress_update = std::time::Instant::now();
+        }
+    }
+
+    file.flush().await?;
+    drop(file);
+
+    // Validate zip size
+    let zip_size = tokio::fs::metadata(&zip_path).await.map(|m| m.len()).unwrap_or(0);
+    let expected_min = model.size_mb() * 1024 * 1024 * 5 / 10; // zipped can be ~50%+ of original
+    if zip_size < expected_min {
+        let _ = tokio::fs::remove_file(&zip_path).await;
+        emit_progress(app, &model_name, 0, 0, 0.0, DownloadStatus::Failed);
+        return Err(anyhow!(
+            "GitHub download also too small ({:.1} MB). Corporate firewall likely blocking all downloads. Use the manual download option.",
+            zip_size as f64 / (1024.0 * 1024.0)
+        ));
+    }
+
+    // Extract .bin from zip
+    log::info!("Extracting model from zip...");
+    let zip_path_clone = zip_path.clone();
+    let model_path_clone = model_path.clone();
+    let extract_result = tokio::task::spawn_blocking(move || {
+        extract_bin_from_zip(&zip_path_clone, &model_path_clone)
+    }).await?;
+
+    // Clean up zip
+    let _ = tokio::fs::remove_file(&zip_path).await;
+
+    extract_result?;
+
+    log::info!("Model {} extracted from GitHub zip to {:?}", model_name, model_path);
+    emit_progress(app, &model_name, total_size, total_size, 100.0, DownloadStatus::Completed);
+
+    Ok(model_path)
+}
+
+/// Extract a .bin file from a zip archive
+pub fn extract_bin_from_zip(zip_path: &PathBuf, target_path: &PathBuf) -> Result<()> {
+    let file = std::fs::File::open(zip_path)
+        .map_err(|e| anyhow!("Failed to open zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| anyhow!("Invalid zip file: {}", e))?;
+
+    // Find the .bin file inside the zip
+    let bin_index = (0..archive.len()).find(|&i| {
+        archive.by_index(i)
+            .map(|f| f.name().ends_with(".bin"))
+            .unwrap_or(false)
+    }).ok_or_else(|| anyhow!("No .bin model file found inside the zip"))?;
+
+    let mut bin_file = archive.by_index(bin_index)?;
+    let mut out_file = std::fs::File::create(target_path)
+        .map_err(|e| anyhow!("Failed to create output file: {}", e))?;
+    std::io::copy(&mut bin_file, &mut out_file)
+        .map_err(|e| anyhow!("Failed to extract model: {}", e))?;
+
+    log::info!("Extracted '{}' from zip ({} bytes)", bin_file.name(), bin_file.size());
+    Ok(())
 }
 
 /// Emit download progress event to frontend

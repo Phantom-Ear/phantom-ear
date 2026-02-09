@@ -1319,10 +1319,18 @@ pub async fn import_model(
     let target_path = asr::get_model_path(model)
         .map_err(|e| format!("Failed to get model path: {}", e))?;
 
-    // Copy file to models directory
-    log::info!("Importing model from {:?} to {:?} ({} bytes)", source, target_path, file_size);
-    std::fs::copy(&source, &target_path)
-        .map_err(|e| format!("Failed to copy model file: {}", e))?;
+    // Handle .zip files by extracting the .bin inside
+    let is_zip = source.extension().and_then(|e| e.to_str()) == Some("zip");
+
+    if is_zip {
+        log::info!("Extracting model from zip {:?} to {:?}", source, target_path);
+        crate::models::extract_bin_from_zip(&source, &target_path)
+            .map_err(|e| format!("Failed to extract model from zip: {}", e))?;
+    } else {
+        log::info!("Importing model from {:?} to {:?} ({} bytes)", source, target_path, file_size);
+        std::fs::copy(&source, &target_path)
+            .map_err(|e| format!("Failed to copy model file: {}", e))?;
+    }
 
     // Load the model
     let language = {
@@ -1346,10 +1354,13 @@ pub async fn import_model(
 
 /// Get the download URL for a whisper model (for manual download)
 #[tauri::command]
-pub async fn get_model_download_url(model_name: String) -> Result<String, String> {
+pub async fn get_model_download_url(model_name: String) -> Result<serde_json::Value, String> {
     let model: WhisperModel = model_name.parse()
         .map_err(|e: anyhow::Error| e.to_string())?;
-    Ok(model.download_url().to_string())
+    Ok(serde_json::json!({
+        "huggingface": model.download_url(),
+        "github": model.github_release_url(),
+    }))
 }
 
 // ============================================================================
