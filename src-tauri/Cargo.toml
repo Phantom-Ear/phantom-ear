@@ -1,19 +1,19 @@
 [package]
-name = "sidecar"
+name = "phantom-ear"
 version = "0.1.0"
 description = "Privacy-first desktop meeting assistant"
 authors = ["Mosaab"]
 edition = "2021"
 
 [lib]
-name = "sidecar_lib"
+name = "phantom_ear_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

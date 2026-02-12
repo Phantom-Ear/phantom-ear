@@ -511,6 +511,121 @@ pub async fn download_embedding_model(app: &AppHandle) -> Result<PathBuf> {
     Ok(model_dir)
 }
 
+/// Get download URLs for manual embedding model download
+pub fn get_embedding_model_download_urls() -> (String, String) {
+    (
+        BGE_MODEL_URL.to_string(),
+        BGE_TOKENIZER_URL.to_string(),
+    )
+}
+
+/// Import embedding model from manually downloaded files
+/// Accepts either:
+/// - A zip file containing model.onnx and tokenizer.json
+/// - A directory containing both files
+/// - Individual model.onnx or tokenizer.json files (call twice)
+pub fn import_embedding_model(source_path: &PathBuf) -> Result<PathBuf> {
+    let model_dir = get_embedding_model_dir()?;
+    std::fs::create_dir_all(&model_dir)?;
+
+    let source_str = source_path.to_string_lossy();
+
+    if source_str.ends_with(".zip") {
+        // Extract from zip archive
+        log::info!("Importing embedding model from zip: {:?}", source_path);
+        extract_embedding_from_zip(source_path, &model_dir)?;
+    } else if source_path.is_dir() {
+        // Copy from directory
+        log::info!("Importing embedding model from directory: {:?}", source_path);
+        
+        let src_model = source_path.join("model.onnx");
+        let src_tokenizer = source_path.join("tokenizer.json");
+        
+        if src_model.exists() {
+            std::fs::copy(&src_model, model_dir.join("model.onnx"))?;
+            log::info!("Copied model.onnx");
+        }
+        
+        if src_tokenizer.exists() {
+            std::fs::copy(&src_tokenizer, model_dir.join("tokenizer.json"))?;
+            log::info!("Copied tokenizer.json");
+        }
+    } else if source_str.ends_with(".onnx") || source_str.contains("model.onnx") {
+        // Individual model.onnx file
+        log::info!("Importing model.onnx from: {:?}", source_path);
+        std::fs::copy(source_path, model_dir.join("model.onnx"))?;
+    } else if source_str.contains("tokenizer.json") {
+        // Individual tokenizer.json file
+        log::info!("Importing tokenizer.json from: {:?}", source_path);
+        std::fs::copy(source_path, model_dir.join("tokenizer.json"))?;
+    } else {
+        return Err(anyhow!(
+            "Unrecognized file type. Expected .zip, .onnx, tokenizer.json, or a directory"
+        ));
+    }
+
+    // Verify we have both files
+    let model_path = model_dir.join("model.onnx");
+    let tokenizer_path = model_dir.join("tokenizer.json");
+
+    if !model_path.exists() {
+        return Err(anyhow!("model.onnx not found after import. Please provide both model.onnx and tokenizer.json"));
+    }
+    if !tokenizer_path.exists() {
+        return Err(anyhow!("tokenizer.json not found after import. Please provide both model.onnx and tokenizer.json"));
+    }
+
+    log::info!("Embedding model imported successfully to {:?}", model_dir);
+    Ok(model_dir)
+}
+
+/// Extract embedding model files from a zip archive
+fn extract_embedding_from_zip(zip_path: &PathBuf, target_dir: &PathBuf) -> Result<()> {
+    let file = std::fs::File::open(zip_path)
+        .map_err(|e| anyhow!("Failed to open zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| anyhow!("Invalid zip file: {}", e))?;
+
+    let mut found_model = false;
+    let mut found_tokenizer = false;
+
+    for i in 0..archive.len() {
+        let mut zip_file = archive.by_index(i)?;
+        let name = zip_file.name().to_string();
+
+        // Look for model.onnx (might be in a subdirectory like onnx/model.onnx)
+        if name.ends_with("model.onnx") || name.ends_with(".onnx") {
+            let out_path = target_dir.join("model.onnx");
+            let mut out_file = std::fs::File::create(&out_path)
+                .map_err(|e| anyhow!("Failed to create model.onnx: {}", e))?;
+            std::io::copy(&mut zip_file, &mut out_file)
+                .map_err(|e| anyhow!("Failed to extract model.onnx: {}", e))?;
+            log::info!("Extracted '{}' ({} bytes)", name, zip_file.size());
+            found_model = true;
+        }
+
+        // Look for tokenizer.json
+        if name.ends_with("tokenizer.json") {
+            let out_path = target_dir.join("tokenizer.json");
+            let mut out_file = std::fs::File::create(&out_path)
+                .map_err(|e| anyhow!("Failed to create tokenizer.json: {}", e))?;
+            std::io::copy(&mut zip_file, &mut out_file)
+                .map_err(|e| anyhow!("Failed to extract tokenizer.json: {}", e))?;
+            log::info!("Extracted '{}' ({} bytes)", name, zip_file.size());
+            found_tokenizer = true;
+        }
+    }
+
+    if !found_model {
+        return Err(anyhow!("No model.onnx found in the zip archive"));
+    }
+    if !found_tokenizer {
+        return Err(anyhow!("No tokenizer.json found in the zip archive"));
+    }
+
+    Ok(())
+}
+
 /// Get total disk space used by models
 pub fn get_models_disk_usage() -> Result<u64> {
     let models_dir = get_models_dir()?;

@@ -16,6 +16,7 @@ pub struct AudioCapture {
     samples: Arc<Mutex<Vec<f32>>>,
     is_recording: Arc<AtomicBool>,
     sample_rate: u32,
+    recent_samples: Arc<Mutex<Vec<f32>>>, // For RMS calculation
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +39,7 @@ impl AudioCapture {
             samples: Arc::new(Mutex::new(Vec::new())),
             is_recording: Arc::new(AtomicBool::new(false)),
             sample_rate: 16000,
+            recent_samples: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -103,6 +105,11 @@ impl AudioCapture {
             samples.reserve(self.sample_rate as usize * BUFFER_SECONDS);
         }
 
+        // Clear recent samples for RMS calculation
+        if let Ok(mut recent) = self.recent_samples.lock() {
+            recent.clear();
+        }
+
         let config = StreamConfig {
             channels: supported_config.channels(),
             sample_rate: supported_config.sample_rate(),
@@ -110,6 +117,7 @@ impl AudioCapture {
         };
 
         let samples = self.samples.clone();
+        let recent_samples = self.recent_samples.clone();
         let channels = config.channels as usize;
         let err_fn = |err| log::error!("Audio stream error: {}", err);
 
@@ -127,6 +135,23 @@ impl AudioCapture {
                                 }
                             } else {
                                 buf.extend_from_slice(data);
+                            }
+                        }
+                        // Store recent samples for RMS calculation
+                        if let Ok(mut recent) = recent_samples.lock() {
+                            recent.clear();
+                            if channels > 1 {
+                                for chunk in data.chunks(channels) {
+                                    let mono = chunk.iter().sum::<f32>() / channels as f32;
+                                    recent.push(mono);
+                                }
+                            } else {
+                                recent.extend_from_slice(data);
+                            }
+                            // Keep only last 1024 samples
+                            if recent.len() > 1024 {
+                                let excess = recent.len() - 1024;
+                                recent.drain(0..excess);
                             }
                         }
                     },
@@ -150,6 +175,26 @@ impl AudioCapture {
                                 for &s in data {
                                     buf.push(s as f32 / i16::MAX as f32);
                                 }
+                            }
+                        }
+                        // Store recent samples for RMS calculation
+                        if let Ok(mut recent) = recent_samples.lock() {
+                            recent.clear();
+                            if channels > 1 {
+                                for chunk in data.chunks(channels) {
+                                    let mono = chunk.iter()
+                                        .map(|&s| s as f32 / i16::MAX as f32)
+                                        .sum::<f32>() / channels as f32;
+                                    recent.push(mono);
+                                }
+                            } else {
+                                for &s in data {
+                                    recent.push(s as f32 / i16::MAX as f32);
+                                }
+                            }
+                            if recent.len() > 1024 {
+                                let excess = recent.len() - 1024;
+                                recent.drain(0..excess);
                             }
                         }
                     },
@@ -199,6 +244,21 @@ impl AudioCapture {
     /// Get available sample count
     pub fn available_samples(&self) -> usize {
         self.samples.lock().map(|s| s.len()).unwrap_or(0)
+    }
+
+    /// Get the current RMS audio level (0.0 to 1.0)
+    pub fn get_rms_level(&self) -> f32 {
+        if let Ok(samples) = self.recent_samples.lock() {
+            if samples.is_empty() {
+                return 0.0;
+            }
+            let sum: f32 = samples.iter().map(|s| s * s).sum();
+            let rms = (sum / samples.len() as f32).sqrt();
+            // Normalize to 0-1 range (assuming 16-bit equivalent)
+            (rms * 3.0).min(1.0) // Scale up for better visualization
+        } else {
+            0.0
+        }
     }
 }
 

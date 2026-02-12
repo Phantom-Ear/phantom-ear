@@ -5,6 +5,7 @@ export interface TranscriptSegment {
   time: string;
   text: string;
   timestamp_ms: number;
+  speaker_id?: string | null;
 }
 
 export interface Meeting {
@@ -22,6 +23,7 @@ export interface MeetingListItem {
   pinned: boolean;
   segment_count: number;
   duration_ms: number;
+  first_segment_text?: string;
 }
 
 export interface MeetingWithTranscript {
@@ -52,6 +54,19 @@ export interface Settings {
   whisper_model: string;
   language: string;
   asr_backend: string;
+  audio_device: string | null;
+}
+
+export interface AudioDeviceInfo {
+  name: string;
+  is_default: boolean;
+}
+
+export interface Speaker {
+  id: string;
+  name: string;
+  color: string;
+  created_at: string;
 }
 
 export interface ModelInfo {

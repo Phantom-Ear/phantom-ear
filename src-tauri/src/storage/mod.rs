@@ -1,7 +1,7 @@
 // Storage module — SQLite persistence for meetings, transcripts, and settings
 
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
@@ -48,6 +48,15 @@ pub struct SegmentRow {
     pub time_label: String,
     pub text: String,
     pub timestamp_ms: i64,
+    pub speaker_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Speaker {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -152,6 +161,29 @@ impl Database {
             conn.execute_batch("ALTER TABLE meetings ADD COLUMN summary TEXT;")?;
             log::info!("Added summary column to meetings table");
         }
+
+        // Migration: add speaker_id column to transcript_segments if it doesn't exist
+        let has_speaker_id: bool = {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('transcript_segments') WHERE name='speaker_id'"
+            )?;
+            let count: i64 = stmt.query_row([], |row| row.get(0))?;
+            count > 0
+        };
+        if !has_speaker_id {
+            conn.execute_batch("ALTER TABLE transcript_segments ADD COLUMN speaker_id TEXT;")?;
+            log::info!("Added speaker_id column to transcript_segments table");
+        }
+
+        // Create speakers table if it doesn't exist
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS speakers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );"
+        )?;
 
         Ok(())
     }
@@ -290,7 +322,7 @@ impl Database {
     pub fn get_segments_in_range(&self, meeting_id: &str, from_ms: i64, to_ms: i64) -> Result<Vec<SegmentRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, meeting_id, time_label, text, timestamp_ms
+            "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id
              FROM transcript_segments
              WHERE meeting_id = ?1 AND timestamp_ms >= ?2 AND timestamp_ms <= ?3
              ORDER BY timestamp_ms ASC",
@@ -303,6 +335,7 @@ impl Database {
                     time_label: row.get(2)?,
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
+                    speaker_id: row.get(5)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -313,7 +346,7 @@ impl Database {
     pub fn get_last_segments(&self, meeting_id: &str, limit: usize) -> Result<Vec<SegmentRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, meeting_id, time_label, text, timestamp_ms
+            "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id
              FROM transcript_segments
              WHERE meeting_id = ?1
              ORDER BY timestamp_ms DESC
@@ -327,6 +360,7 @@ impl Database {
                     time_label: row.get(2)?,
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
+                    speaker_id: row.get(5)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -348,8 +382,8 @@ impl Database {
     pub fn insert_segment(&self, seg: &SegmentRow) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO transcript_segments (id, meeting_id, time_label, text, timestamp_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![seg.id, seg.meeting_id, seg.time_label, seg.text, seg.timestamp_ms],
+            "INSERT INTO transcript_segments (id, meeting_id, time_label, text, timestamp_ms, speaker_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![seg.id, seg.meeting_id, seg.time_label, seg.text, seg.timestamp_ms, seg.speaker_id],
         )?;
         Ok(())
     }
@@ -357,7 +391,7 @@ impl Database {
     pub fn get_segments(&self, meeting_id: &str) -> Result<Vec<SegmentRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, meeting_id, time_label, text, timestamp_ms FROM transcript_segments WHERE meeting_id = ?1 ORDER BY timestamp_ms ASC",
+            "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id FROM transcript_segments WHERE meeting_id = ?1 ORDER BY timestamp_ms ASC",
         )?;
         let segments = stmt
             .query_map(params![meeting_id], |row| {
@@ -367,10 +401,121 @@ impl Database {
                     time_label: row.get(2)?,
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
+                    speaker_id: row.get(5)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(segments)
+    }
+
+    /// Update segment text
+    pub fn update_segment_text(&self, segment_id: &str, text: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE transcript_segments SET text = ?1 WHERE id = ?2",
+            params![text, segment_id],
+        )?;
+        Ok(())
+    }
+
+    /// Update segment speaker
+    pub fn update_segment_speaker(&self, segment_id: &str, speaker_id: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE transcript_segments SET speaker_id = ?1 WHERE id = ?2",
+            params![speaker_id, segment_id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a segment
+    pub fn delete_segment(&self, segment_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // Also delete embedding if exists
+        conn.execute(
+            "DELETE FROM segment_embeddings WHERE segment_id = ?1",
+            params![segment_id],
+        )?;
+        conn.execute(
+            "DELETE FROM transcript_segments WHERE id = ?1",
+            params![segment_id],
+        )?;
+        Ok(())
+    }
+
+    // ========================================================================
+    // Speakers
+    // ========================================================================
+
+    /// List all speakers
+    pub fn list_speakers(&self) -> Result<Vec<Speaker>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, color, created_at FROM speakers ORDER BY name ASC"
+        )?;
+        let speakers = stmt
+            .query_map([], |row| {
+                Ok(Speaker {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(speakers)
+    }
+
+    /// Create a new speaker
+    pub fn create_speaker(&self, id: &str, name: &str, color: &str, created_at: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO speakers (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, name, color, created_at],
+        )?;
+        Ok(())
+    }
+
+    /// Update a speaker
+    pub fn update_speaker(&self, id: &str, name: &str, color: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE speakers SET name = ?1, color = ?2 WHERE id = ?3",
+            params![name, color, id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a speaker (clears speaker_id from segments)
+    pub fn delete_speaker(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // Clear speaker_id from segments first
+        conn.execute(
+            "UPDATE transcript_segments SET speaker_id = NULL WHERE speaker_id = ?1",
+            params![id],
+        )?;
+        conn.execute(
+            "DELETE FROM speakers WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Get speaker by ID
+    pub fn get_speaker(&self, id: &str) -> Result<Option<Speaker>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, color, created_at FROM speakers WHERE id = ?1"
+        )?;
+        let speaker = stmt.query_row(params![id], |row| {
+            Ok(Speaker {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        }).optional()?;
+        Ok(speaker)
     }
 
     // ========================================================================

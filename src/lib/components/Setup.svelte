@@ -176,7 +176,7 @@
   }
 </script>
 
-<div class="flex flex-col items-center justify-center min-h-screen p-8 bg-sidecar-bg">
+<div class="flex flex-col items-center justify-center min-h-screen p-8 bg-phantom-ear-bg">
   <div class="w-full max-w-md">
     <!-- Logo and Title -->
     <div class="text-center mb-8">
@@ -189,40 +189,40 @@
         </div>
       </div>
       <h1 class="text-2xl font-semibold mb-2">Welcome to PhantomEar</h1>
-      <p class="text-sidecar-text-muted text-sm">
+      <p class="text-phantom-ear-text-muted text-sm">
         Privacy-first meeting assistant with real-time transcription
       </p>
     </div>
 
     <!-- Device Specs Card (if detected) -->
     {#if deviceSpecs && !isDownloading && !showManualDownload}
-      <div class="glass rounded-xl border border-sidecar-border p-4 mb-4 shadow-glow-surface">
+      <div class="glass rounded-xl border border-phantom-ear-border p-4 mb-4 shadow-glow-surface">
         <div class="flex items-center gap-2 mb-3">
-          <svg class="w-4 h-4 text-sidecar-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
           </svg>
-          <span class="text-sm font-medium text-sidecar-text">Your System</span>
+          <span class="text-sm font-medium text-phantom-ear-text">Your System</span>
         </div>
         <div class="grid grid-cols-2 gap-3 text-xs">
           <div class="flex items-center gap-2">
-            <span class="text-sidecar-text-muted">CPU:</span>
-            <span class="text-sidecar-text truncate">{deviceSpecs.cpu_cores} cores</span>
+            <span class="text-phantom-ear-text-muted">CPU:</span>
+            <span class="text-phantom-ear-text truncate">{deviceSpecs.cpu_cores} cores</span>
           </div>
           <div class="flex items-center gap-2">
-            <span class="text-sidecar-text-muted">RAM:</span>
-            <span class="text-sidecar-text">{deviceSpecs.ram_gb.toFixed(0)} GB</span>
+            <span class="text-phantom-ear-text-muted">RAM:</span>
+            <span class="text-phantom-ear-text">{deviceSpecs.ram_gb.toFixed(0)} GB</span>
           </div>
           {#if deviceSpecs.has_gpu}
             <div class="flex items-center gap-2 col-span-2">
-              <span class="text-sidecar-text-muted">GPU:</span>
-              <span class="text-sidecar-success">{deviceSpecs.gpu_name || "Available"}</span>
+              <span class="text-phantom-ear-text-muted">GPU:</span>
+              <span class="text-phantom-ear-success">{deviceSpecs.gpu_name || "Available"}</span>
             </div>
           {/if}
         </div>
         {#if recommendation}
-          <div class="mt-3 pt-3 border-t border-sidecar-border/50">
-            <p class="text-xs text-sidecar-text-muted">
-              <span class="text-sidecar-accent font-medium">{recommendation.recommended_model}</span> model recommended - {recommendation.reason}
+          <div class="mt-3 pt-3 border-t border-phantom-ear-border/50">
+            <p class="text-xs text-phantom-ear-text-muted">
+              <span class="text-phantom-ear-accent font-medium">{recommendation.recommended_model}</span> model recommended - {recommendation.reason}
             </p>
           </div>
         {/if}
@@ -230,43 +230,43 @@
     {/if}
 
     <!-- Setup Card -->
-    <div class="glass rounded-2xl border border-sidecar-border p-6 shadow-glow-surface">
+    <div class="glass rounded-2xl border border-phantom-ear-border p-6 shadow-glow-surface">
 
       {#if showManualDownload}
         <!-- Manual Download Flow -->
         <div class="text-center">
-          <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-sidecar-accent/20 flex items-center justify-center">
-            <svg class="w-7 h-7 text-sidecar-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-phantom-ear-accent/20 flex items-center justify-center">
+            <svg class="w-7 h-7 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
           </div>
 
           <h2 class="text-lg font-medium mb-2">Manual Download</h2>
-          <p class="text-sm text-sidecar-text-muted mb-4">
-            A browser window has opened to download the <span class="text-sidecar-text font-medium capitalize">{selectedModel}</span> model ({getModelSizeMb()} MB).
+          <p class="text-sm text-phantom-ear-text-muted mb-4">
+            A browser window has opened to download the <span class="text-phantom-ear-text font-medium capitalize">{selectedModel}</span> model ({getModelSizeMb()} MB).
           </p>
 
-          <div class="bg-sidecar-surface/50 border border-sidecar-border/50 rounded-xl p-4 mb-5">
+          <div class="bg-phantom-ear-surface/50 border border-phantom-ear-border/50 rounded-xl p-4 mb-5">
             <div class="flex items-start gap-3">
-              <div class="w-6 h-6 rounded-full bg-sidecar-accent/20 flex items-center justify-center shrink-0 mt-0.5">
-                <span class="text-xs font-bold text-sidecar-accent">1</span>
+              <div class="w-6 h-6 rounded-full bg-phantom-ear-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-xs font-bold text-phantom-ear-accent">1</span>
               </div>
-              <p class="text-sm text-sidecar-text-muted text-left">
-                Wait for the <span class="text-sidecar-text">.zip</span> file to finish downloading in your browser (~1 min)
+              <p class="text-sm text-phantom-ear-text-muted text-left">
+                Wait for the <span class="text-phantom-ear-text">.zip</span> file to finish downloading in your browser (~1 min)
               </p>
             </div>
             <div class="flex items-start gap-3 mt-3">
-              <div class="w-6 h-6 rounded-full bg-sidecar-accent/20 flex items-center justify-center shrink-0 mt-0.5">
-                <span class="text-xs font-bold text-sidecar-accent">2</span>
+              <div class="w-6 h-6 rounded-full bg-phantom-ear-accent/20 flex items-center justify-center shrink-0 mt-0.5">
+                <span class="text-xs font-bold text-phantom-ear-accent">2</span>
               </div>
-              <p class="text-sm text-sidecar-text-muted text-left">
-                Click <span class="text-sidecar-text">Import Model</span> below and select the downloaded .zip or .bin file
+              <p class="text-sm text-phantom-ear-text-muted text-left">
+                Click <span class="text-phantom-ear-text">Import Model</span> below and select the downloaded .zip or .bin file
               </p>
             </div>
           </div>
 
           {#if error}
-            <div class="mb-4 p-3 rounded-xl bg-sidecar-danger/10 border border-sidecar-danger/20 text-sidecar-danger text-sm">
+            <div class="mb-4 p-3 rounded-xl bg-phantom-ear-danger/10 border border-phantom-ear-danger/20 text-phantom-ear-danger text-sm">
               {error}
             </div>
           {/if}
@@ -286,13 +286,13 @@
           <div class="flex gap-3 mt-3">
             <button
               onclick={openManualDownload}
-              class="flex-1 py-2.5 px-4 border border-sidecar-border rounded-xl text-sm text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors"
+              class="flex-1 py-2.5 px-4 border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-text-muted transition-colors"
             >
               Re-open Link
             </button>
             <button
               onclick={() => { showManualDownload = false; downloadFailed = false; }}
-              class="flex-1 py-2.5 px-4 border border-sidecar-border rounded-xl text-sm text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-text-muted transition-colors"
+              class="flex-1 py-2.5 px-4 border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-text-muted transition-colors"
             >
               Back
             </button>
@@ -302,14 +302,14 @@
       {:else if downloadFailed}
         <!-- Download Failed - Retry / Manual -->
         <div class="text-center">
-          <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-sidecar-warning/20 flex items-center justify-center">
-            <svg class="w-7 h-7 text-sidecar-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-14 h-14 mx-auto mb-4 rounded-xl bg-phantom-ear-warning/20 flex items-center justify-center">
+            <svg class="w-7 h-7 text-phantom-ear-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
           </div>
 
           <h2 class="text-lg font-medium mb-2">Download Blocked</h2>
-          <p class="text-sm text-sidecar-text-muted mb-6">
+          <p class="text-sm text-phantom-ear-text-muted mb-6">
             The automatic download was blocked, likely by a corporate firewall or proxy. You can retry or download the model manually.
           </p>
 
@@ -322,13 +322,13 @@
             </button>
             <button
               onclick={openManualDownload}
-              class="w-full py-3 px-4 border border-sidecar-border rounded-xl font-medium text-sidecar-text hover:border-sidecar-accent hover:text-sidecar-accent transition-colors"
+              class="w-full py-3 px-4 border border-phantom-ear-border rounded-xl font-medium text-phantom-ear-text hover:border-phantom-ear-accent hover:text-phantom-ear-accent transition-colors"
             >
               Download Manually
             </button>
           </div>
 
-          <p class="text-xs text-sidecar-text-muted mt-4">
+          <p class="text-xs text-phantom-ear-text-muted mt-4">
             Manual download takes about 1 minute on a fast connection
           </p>
         </div>
@@ -336,7 +336,7 @@
       {:else if !isDownloading}
         <!-- Normal Setup - Model Selection -->
         <h2 class="text-lg font-medium mb-4">Download Speech Model</h2>
-        <p class="text-sm text-sidecar-text-muted mb-6">
+        <p class="text-sm text-phantom-ear-text-muted mb-6">
           PhantomEar uses a local AI model for speech recognition. All transcription happens on your device - your audio never leaves your computer.
         </p>
 
@@ -348,10 +348,10 @@
             <label
               class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors
                 {selectedModel === model.name
-                  ? 'border-sidecar-accent bg-sidecar-accent/10'
+                  ? 'border-phantom-ear-accent bg-phantom-ear-accent/10'
                   : compat && !compat.compatible
-                    ? 'border-sidecar-border/50 opacity-60'
-                    : 'border-sidecar-border hover:border-sidecar-text-muted'}"
+                    ? 'border-phantom-ear-border/50 opacity-60'
+                    : 'border-phantom-ear-border hover:border-phantom-ear-text-muted'}"
             >
               <input
                 type="radio"
@@ -369,27 +369,27 @@
                     </span>
                   {/if}
                   {#if model.downloaded}
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-sidecar-success/20 text-sidecar-success">
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-phantom-ear-success/20 text-phantom-ear-success">
                       Downloaded
                     </span>
                   {/if}
                   {#if compat && !compat.compatible}
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-sidecar-warning/20 text-sidecar-warning">
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-phantom-ear-warning/20 text-phantom-ear-warning">
                       May be slow
                     </span>
                   {/if}
                 </div>
                 <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-xs text-sidecar-text-muted">{model.size_mb} MB</span>
+                  <span class="text-xs text-phantom-ear-text-muted">{model.size_mb} MB</span>
                   {#if model.description}
-                    <span class="text-xs text-sidecar-text-muted">• {model.description}</span>
+                    <span class="text-xs text-phantom-ear-text-muted">• {model.description}</span>
                   {/if}
                 </div>
               </div>
               <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0
-                {selectedModel === model.name ? 'border-sidecar-accent' : 'border-sidecar-border'}">
+                {selectedModel === model.name ? 'border-phantom-ear-accent' : 'border-phantom-ear-border'}">
                 {#if selectedModel === model.name}
-                  <div class="w-2.5 h-2.5 rounded-full bg-sidecar-accent"></div>
+                  <div class="w-2.5 h-2.5 rounded-full bg-phantom-ear-accent"></div>
                 {/if}
               </div>
             </label>
@@ -397,7 +397,7 @@
         </div>
 
         {#if error}
-          <div class="mb-4 p-3 rounded-xl bg-sidecar-danger/10 border border-sidecar-danger/20 text-sidecar-danger text-sm">
+          <div class="mb-4 p-3 rounded-xl bg-phantom-ear-danger/10 border border-phantom-ear-danger/20 text-phantom-ear-danger text-sm">
             {error}
           </div>
         {/if}
@@ -409,7 +409,7 @@
           Download & Continue
         </button>
 
-        <p class="text-xs text-sidecar-text-muted text-center mt-4">
+        <p class="text-xs text-phantom-ear-text-muted text-center mt-4">
           You can change the model later in Settings
         </p>
 
@@ -418,15 +418,15 @@
         <div class="text-center">
           <div class="relative w-14 h-14 mx-auto mb-4">
             {#if downloadProgress?.status === "Completed"}
-              <div class="w-full h-full rounded-xl bg-sidecar-success/20 flex items-center justify-center">
-                <svg class="w-7 h-7 text-sidecar-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div class="w-full h-full rounded-xl bg-phantom-ear-success/20 flex items-center justify-center">
+                <svg class="w-7 h-7 text-phantom-ear-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
             {:else}
               <div class="absolute inset-0 rounded-xl bg-gradient-accent opacity-20 animate-pulse"></div>
-              <div class="relative w-full h-full rounded-xl bg-sidecar-surface flex items-center justify-center">
-                <svg class="w-6 h-6 text-sidecar-accent animate-spin" fill="none" viewBox="0 0 24 24">
+              <div class="relative w-full h-full rounded-xl bg-phantom-ear-surface flex items-center justify-center">
+                <svg class="w-6 h-6 text-phantom-ear-accent animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                 </svg>
@@ -443,23 +443,23 @@
           </h2>
 
           {#if downloadProgress}
-            <p class="text-sm text-sidecar-text-muted mb-4">
+            <p class="text-sm text-phantom-ear-text-muted mb-4">
               {formatBytes(downloadProgress.downloaded_bytes)} / {formatBytes(downloadProgress.total_bytes)}
             </p>
 
             <!-- Progress Bar -->
-            <div class="w-full h-2.5 bg-sidecar-border rounded-full overflow-hidden mb-2">
+            <div class="w-full h-2.5 bg-phantom-ear-border rounded-full overflow-hidden mb-2">
               <div
                 class="h-full bg-gradient-accent transition-all duration-300 ease-out rounded-full"
                 style="width: {downloadProgress.percentage}%"
               ></div>
             </div>
 
-            <p class="text-sm text-sidecar-text-muted font-mono">
+            <p class="text-sm text-phantom-ear-text-muted font-mono">
               {downloadProgress.percentage.toFixed(1)}%
             </p>
           {:else}
-            <p class="text-sm text-sidecar-text-muted">
+            <p class="text-sm text-phantom-ear-text-muted">
               Preparing download...
             </p>
           {/if}
@@ -468,11 +468,11 @@
     </div>
 
     <!-- Privacy Note -->
-    <div class="flex items-center justify-center gap-2 mt-6 px-4 py-2 rounded-full bg-sidecar-surface/50 border border-sidecar-border/50 mx-auto w-fit">
-      <svg class="w-4 h-4 text-sidecar-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="flex items-center justify-center gap-2 mt-6 px-4 py-2 rounded-full bg-phantom-ear-surface/50 border border-phantom-ear-border/50 mx-auto w-fit">
+      <svg class="w-4 h-4 text-phantom-ear-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
       </svg>
-      <p class="text-xs text-sidecar-text-muted">
+      <p class="text-xs text-phantom-ear-text-muted">
         Your audio and transcripts stay on your device
       </p>
     </div>

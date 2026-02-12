@@ -154,10 +154,10 @@ phantomear/
 
 ### Custom Theme (`src/app.css`)
 Colors defined in `@theme`:
-- `--color-sidecar-bg`: #0a0a0b (main background)
-- `--color-sidecar-surface`: #141416 (cards/panels)
-- `--color-sidecar-accent`: #3b82f6 (primary blue)
-- `--color-sidecar-danger`: #ef4444 (recording indicator)
+- `--color-phantom-ear-bg`: #212121 (main background)
+- `--color-phantom-ear-surface`: #2f2f2f (cards/panels)
+- `--color-phantom-ear-accent`: #3b82f6 (primary blue)
+- `--color-phantom-ear-danger`: #ef4444 (recording indicator)
 
 ### State Management
 Uses Svelte 5 runes (`$state`, `$props`) for reactive state.

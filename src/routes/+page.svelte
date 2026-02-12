@@ -7,8 +7,13 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
   import ReferenceCard from "$lib/components/ReferenceCard.svelte";
+  import SearchOverlay from "$lib/components/SearchOverlay.svelte";
+  import TranscriptTimeline from "$lib/components/TranscriptTimeline.svelte";
+  import HomeMetrics from "$lib/components/HomeMetrics.svelte";
+  import EditableSegment from "$lib/components/EditableSegment.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
-  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult } from "$lib/types";
+  import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
+  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker } from "$lib/types";
 
   interface DownloadProgress {
     model_name: string;
@@ -27,6 +32,9 @@
 
   // Pause state
   let isPaused = $state(false);
+
+  // Track the meeting ID that is currently being recorded (separate from active/viewed meeting)
+  let liveRecordingMeetingId = $state<string | null>(null);
 
   // Q&A state
   let question = $state("");
@@ -63,9 +71,15 @@
   // Embedding state
   let embeddingModelLoaded = $state(false);
   let embeddingDownloading = $state(false);
+  let embeddingDownloadFailed = $state(false);
+  let showEmbeddingManualDownload = $state(false);
+  let embeddingImporting = $state(false);
 
   // Export state
   let exportCopied = $state(false);
+
+  // Speakers state
+  let speakers = $state<Speaker[]>([]);
 
   // Splash screen state
   let showSplash = $state(true);
@@ -76,6 +90,47 @@
   let scrambleOutput = $state<Array<{ char: string; scrambled: boolean }>>([]);
   let scrambleComplete = $state(false);
   let scrambleStarted = false;
+
+  // Search overlay state
+  let showSearchOverlay = $state(false);
+
+  // Keyboard shortcut state
+  let sidebarFocused = $state(false);
+
+  // Derived: Are we viewing a past meeting (not the live recording)?
+  const isViewingPastMeeting = $derived(
+    meetingsStore.activeMeetingId !== null &&
+    meetingsStore.activeMeetingId !== liveRecordingMeetingId &&
+    currentView === 'home'
+  );
+
+  // Derived: Should show recording indicator (recording AND navigated away from live view)?
+  const showRecordingIndicator = $derived(
+    isRecording && (currentView !== 'home' || isViewingPastMeeting)
+  );
+
+  // Return to live recording
+  function returnToLiveRecording() {
+    // First switch view to home
+    currentView = 'home';
+
+    // Set active meeting to the live recording meeting
+    // This ensures isViewingPastMeeting becomes false
+    if (liveRecordingMeetingId) {
+      meetingsStore.setActive(liveRecordingMeetingId);
+      meetingsStore.setActiveTranscript(transcript);
+    } else {
+      meetingsStore.clearActive();
+    }
+
+    // Scroll transcript to bottom after DOM updates
+    // Use requestAnimationFrame to ensure render is complete
+    requestAnimationFrame(() => {
+      scrollTranscriptToBottom();
+      // Additional scroll attempt for reliability
+      setTimeout(() => scrollTranscriptToBottom(), 150);
+    });
+  }
 
   const languageNames: Record<string, string> = {
     auto: "Auto-detect",
@@ -97,6 +152,7 @@
   // Timer and event listener
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let unlistenTranscription: UnlistenFn | null = null;
+  let unlistenTray: UnlistenFn | null = null;
   let transcriptContainer: HTMLDivElement | null = null;
 
   onMount(async () => {
@@ -119,8 +175,9 @@
         console.error("Failed to load settings:", e);
       }
 
-      // Load meetings from DB
+      // Load meetings and speakers from DB
       await meetingsStore.loadMeetings();
+      await loadSpeakers();
 
       // If model is downloaded, load it into memory
       if (status.whisper_downloaded) {
@@ -141,6 +198,14 @@
     isLoading = false;
     // Wait for both loading AND animation to complete before hiding splash
     waitForSplashEnd();
+
+    // Register global keyboard shortcuts
+    window.addEventListener('keydown', handleGlobalKeydown);
+
+    // Listen for system tray toggle recording event
+    unlistenTray = await listen<void>("tray-toggle-recording", () => {
+      toggleRecording();
+    });
   });
 
   // Splash: logo fly-in (0.6s) + hold (0.6s) = ~1.2s minimum
@@ -185,7 +250,57 @@
     if (unlistenDownload) {
       unlistenDownload();
     }
+    if (unlistenTray) {
+      unlistenTray();
+    }
+    // Remove keyboard event listener
+    window.removeEventListener('keydown', handleGlobalKeydown);
   });
+
+  // Global keyboard shortcut handler
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Skip if we're in an input field or textarea
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      // Except for Escape key
+      if (e.key === 'Escape') {
+        (target as HTMLInputElement | HTMLTextAreaElement).blur();
+      }
+      return;
+    }
+
+    // Cmd/Ctrl + Shift + R: Toggle Recording
+    const cmdKey = isMacOS() ? e.metaKey : e.ctrlKey;
+    if (cmdKey && e.shiftKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault();
+      if (!needsSetup && !isLoading) {
+        toggleRecording();
+      }
+      return;
+    }
+
+    // Cmd/Ctrl + K: Quick Search
+    if (cmdKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      showSearchOverlay = true;
+      return;
+    }
+
+    // Cmd/Ctrl + B: Toggle Sidebar
+    if (cmdKey && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      sidebarCollapsed = !sidebarCollapsed;
+      return;
+    }
+
+    // Escape: Close search overlay
+    if (e.key === 'Escape') {
+      if (showSearchOverlay) {
+        showSearchOverlay = false;
+      }
+      return;
+    }
+  }
 
   // Format milliseconds to MM:SS
   function formatTimeMs(ms: number): string {
@@ -211,11 +326,16 @@
       // Add to local transcript
       transcript = [...transcript, segment];
 
-      // Also add to active meeting (optimistic UI)
-      meetingsStore.addLocalSegment(segment);
+      // Only add to meeting store if viewing the live recording (not a past meeting)
+      // This prevents segments from appearing in old meetings when navigating during recording
+      if (meetingsStore.activeMeetingId === liveRecordingMeetingId) {
+        meetingsStore.addLocalSegment(segment);
+      }
 
-      // Auto-scroll to bottom
-      scrollTranscriptToBottom();
+      // Auto-scroll to bottom (only if viewing the live recording)
+      if (meetingsStore.activeMeetingId === liveRecordingMeetingId) {
+        scrollTranscriptToBottom();
+      }
     });
   }
 
@@ -242,6 +362,7 @@
       // Stop recording
       isRecording = false;
       isPaused = false;
+      liveRecordingMeetingId = null;
 
       // Stop the timer
       if (timerInterval) {
@@ -280,6 +401,7 @@
         // start_recording now returns meeting ID
         const meetingId = await invoke<string>("start_recording");
         isRecording = true;
+        liveRecordingMeetingId = meetingId;
 
         // Set active meeting and refresh list
         meetingsStore.setActive(meetingId);
@@ -353,6 +475,7 @@
       } else {
         // Auto-download in background
         embeddingDownloading = true;
+        embeddingDownloadFailed = false;
         await invoke("download_embedding_model_cmd");
         embeddingModelLoaded = true;
         embeddingDownloading = false;
@@ -361,7 +484,66 @@
     } catch (e) {
       console.error("Embedding model init failed:", e);
       embeddingDownloading = false;
+      const errMsg = String(e);
+      if (errMsg.includes("too small") || errMsg.includes("firewall") || errMsg.includes("proxy") || errMsg.includes("blocked")) {
+        embeddingDownloadFailed = true;
+      }
     }
+  }
+
+  async function openEmbeddingManualDownload() {
+    showEmbeddingManualDownload = true;
+    embeddingDownloadFailed = false;
+
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      const urls = await invoke<{ model_url: string; tokenizer_url: string }>("get_embedding_model_download_urls");
+      // Open both URLs in browser - user needs to download both files
+      await openUrl(urls.model_url);
+      // Small delay before opening second URL
+      setTimeout(async () => {
+        await openUrl(urls.tokenizer_url);
+      }, 500);
+    } catch (e) {
+      console.error("Failed to open download links:", e);
+    }
+  }
+
+  async function importEmbeddingModel() {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    
+    embeddingImporting = true;
+    try {
+      const selected = await open({
+        title: "Select embedding model file (model.onnx, tokenizer.json, or .zip)",
+        filters: [
+          { name: "Model files", extensions: ["onnx", "json", "zip"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+        multiple: true,
+      });
+
+      if (!selected) {
+        embeddingImporting = false;
+        return;
+      }
+
+      const files = Array.isArray(selected) ? selected : [selected];
+
+      // Import each selected file
+      for (const filePath of files) {
+        await invoke("import_embedding_model", { filePath: filePath });
+      }
+
+      // Load the model after import
+      await invoke("load_embedding_model");
+      embeddingModelLoaded = true;
+      showEmbeddingManualDownload = false;
+      console.log("Embedding model imported and loaded");
+    } catch (e) {
+      console.error("Embedding model import failed:", e);
+    }
+    embeddingImporting = false;
   }
 
   async function askPhomy() {
@@ -457,6 +639,18 @@
 
   function handleNavigate(view: View) {
     currentView = view;
+    // When navigating to Home, clear past meeting state (unless actively recording)
+    if (view === 'home') {
+      if (isRecording && liveRecordingMeetingId) {
+        // If recording, switch back to live view
+        meetingsStore.setActive(liveRecordingMeetingId);
+        meetingsStore.setActiveTranscript(transcript);
+      } else if (!isRecording) {
+        // If not recording, clear active meeting to show the start recording button
+        meetingsStore.clearActive();
+        transcript = [];
+      }
+    }
   }
 
   function scrollTranscriptToBottom() {
@@ -591,6 +785,30 @@
     }
   }
 
+  function handleSegmentUpdate(updatedSegment: TranscriptSegment) {
+    // Update local transcript array
+    transcript = transcript.map(seg =>
+      seg.id === updatedSegment.id ? updatedSegment : seg
+    );
+    // Also update the store
+    meetingsStore.setActiveTranscript(transcript);
+  }
+
+  function handleSegmentDelete(segmentId: string) {
+    // Remove from local transcript array
+    transcript = transcript.filter(seg => seg.id !== segmentId);
+    // Also update the store
+    meetingsStore.setActiveTranscript(transcript);
+  }
+
+  async function loadSpeakers() {
+    try {
+      speakers = await invoke<Speaker[]>("list_speakers");
+    } catch (e) {
+      console.error("Failed to load speakers:", e);
+    }
+  }
+
   function handleSearch(query: string) {
     meetingsStore.searchMeetings(query);
   }
@@ -601,7 +819,7 @@
 </script>
 
 {#if showSplash}
-  <div class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-sidecar-bg {splashFadingOut ? 'animate-splash-fade-out' : ''}">
+  <div class="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-phantom-ear-bg {splashFadingOut ? 'animate-splash-fade-out' : ''}">
     <!-- PhantomEar Logo -->
     <div class="animate-phantom-fly">
       <img
@@ -617,7 +835,7 @@
 {#if !showSplash && needsSetup}
   <Setup onComplete={handleSetupComplete} />
 {:else if !showSplash}
-  <div class="flex h-screen bg-sidecar-bg no-select">
+  <div class="flex h-screen bg-phantom-ear-bg no-select">
     <!-- Sidebar -->
     <Sidebar
       collapsed={sidebarCollapsed}
@@ -632,6 +850,7 @@
       onTogglePinMeeting={(id) => meetingsStore.togglePin(id)}
       onDeleteMeeting={(id) => meetingsStore.deleteMeeting(id)}
       onSearch={handleSearch}
+      onOpenSearchOverlay={() => showSearchOverlay = true}
     />
 
     <!-- Main Content -->
@@ -652,59 +871,165 @@
         {isPaused}
         onToggleRecording={toggleRecording}
         onTogglePause={togglePause}
+        showLiveIndicator={showRecordingIndicator}
+        onReturnToLive={returnToLiveRecording}
       />
 
       <!-- Content Area -->
       <div class="flex-1 flex flex-col overflow-hidden">
         {#if currentView === 'home'}
-          <div class="flex-1 flex flex-col p-6 overflow-hidden">
-            <!-- Recording Control (only show big button when NOT recording) -->
-            {#if !isRecording}
-              <div class="flex flex-col items-center justify-center py-6">
+          <!-- HOME VIEW: Clean CTA + Metrics (when NOT recording and NOT viewing past meeting) -->
+          {#if !isRecording && !isViewingPastMeeting}
+            <div class="flex-1 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+              <!-- Animated Background Orbs -->
+              <div class="absolute inset-0 overflow-hidden pointer-events-none">
+                <div class="absolute w-64 h-64 rounded-full bg-gradient-to-br from-phantom-ear-accent/10 to-phantom-ear-purple/5 blur-3xl animate-float animate-float-delay-1" style="top: 10%; left: 20%;"></div>
+                <div class="absolute w-48 h-48 rounded-full bg-gradient-to-br from-phantom-ear-purple/10 to-phantom-ear-accent/5 blur-3xl animate-float-slow animate-float-delay-2" style="top: 60%; right: 15%;"></div>
+                <div class="absolute w-32 h-32 rounded-full bg-gradient-to-br from-phantom-ear-accent/8 to-transparent blur-2xl animate-float-fast animate-float-delay-3" style="bottom: 20%; left: 10%;"></div>
+              </div>
+
+              <!-- Large centered recording button -->
+              <div class="flex flex-col items-center relative z-10">
                 <div class="relative">
+                  <!-- Outer glow ring -->
+                  <div class="absolute inset-0 w-24 h-24 rounded-full bg-gradient-accent opacity-20 blur-xl animate-glow-pulse"></div>
+                  <!-- Ripple rings -->
+                  <div class="absolute inset-0 w-24 h-24 rounded-full border-2 border-phantom-ear-accent/30 animate-ring-pulse"></div>
                   <button
                     onclick={toggleRecording}
-                    class="relative w-20 h-20 rounded-full transition-all duration-300 btn-shine bg-gradient-accent animate-idle-glow hover:scale-105"
+                    class="relative w-24 h-24 rounded-full transition-all duration-300 btn-shine btn-ripple bg-gradient-accent animate-glow-pulse hover:scale-105 active:scale-95"
+                    title="Start recording"
                   >
-                    <svg class="w-7 h-7 mx-auto text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-8 h-8 mx-auto text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24">
                       <circle cx="12" cy="12" r="6" />
                     </svg>
                   </button>
                 </div>
 
-                <p class="mt-3 text-sm text-sidecar-text-muted">
-                  Click to start recording
+                <p class="mt-5 text-lg font-medium text-phantom-ear-text animate-scale-in">
+                  Start Recording
+                </p>
+                <p class="mt-1.5 text-xs text-phantom-ear-text-muted animate-scale-in" style="animation-delay: 0.1s;">
+                  Press {isMacOS() ? '⌘' : 'Ctrl'} + Shift + R to start
                 </p>
               </div>
-            {/if}
 
-            <!-- Transcript + AI Results Area -->
-            <div class="flex-1 flex flex-col min-h-0">
-              <!-- Collapsible Header -->
-              <div class="flex items-center justify-between mb-3">
-                <button
-                  onclick={() => transcriptCollapsed = !transcriptCollapsed}
-                  class="flex items-center gap-2 group"
-                >
-                  <svg
-                    class="w-4 h-4 text-sidecar-text-muted transition-transform {transcriptCollapsed ? '-rotate-90' : ''}"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                  <h2 class="text-sm font-medium text-sidecar-text-muted uppercase tracking-wide">Live Transcript</h2>
-                </button>
+              <!-- Home Metrics Section -->
+              <div class="mt-10 relative z-10 w-full flex justify-center">
+                <HomeMetrics />
+              </div>
+            </div>
+          {:else if isRecording}
+            <!-- LIVE RECORDING VIEW -->
+            <div class="flex-1 flex flex-col p-6 overflow-hidden">
+              <!-- Timeline -->
+              <div class="mb-4">
+                <TranscriptTimeline
+                  segments={transcript}
+                  duration={recordingDuration}
+                  currentPosition={recordingDuration}
+                  isRecording={isRecording}
+                  onSeek={(timestampMs) => {
+                    const targetSec = timestampMs / 1000;
+                    const closestSegment = transcript.reduce((prev, curr) => {
+                      const prevDiff = Math.abs((prev.timestamp_ms || 0) / 1000 - targetSec);
+                      const currDiff = Math.abs((curr.timestamp_ms || 0) / 1000 - targetSec);
+                      return currDiff < prevDiff ? curr : prev;
+                    }, transcript[0]);
+                    if (closestSegment && transcriptContainer) {
+                      const segmentEl = transcriptContainer.querySelector(`[data-segment-id="${closestSegment.id}"]`);
+                      if (segmentEl) {
+                        segmentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        segmentEl.classList.add('bg-phantom-ear-accent/10');
+                        setTimeout(() => segmentEl.classList.remove('bg-phantom-ear-accent/10'), 1500);
+                      }
+                    }
+                  }}
+                />
+              </div>
+
+              <!-- Live Transcript -->
+              <div class="flex-1 flex flex-col min-h-0">
+                <div class="flex items-center justify-between mb-3">
+                  <h2 class="text-sm font-medium text-phantom-ear-text-muted uppercase tracking-wide">Live Transcript</h2>
+                  <span class="text-xs text-phantom-ear-text-muted">{transcript.length} segments</span>
+                </div>
+
+                <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden shadow-glow-surface">
+                  {#if transcript.length === 0}
+                    <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
+                      <p class="text-sm font-medium">Listening...</p>
+                      <p class="text-xs mt-1 opacity-70">Speech will appear here in real-time</p>
+                    </div>
+                  {:else}
+                    <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
+                      {#each transcript as segment (segment.id)}
+                        <div data-segment-id={segment.id} class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-phantom-ear-surface/50 transition-colors">
+                          <span class="text-xs text-phantom-ear-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
+                          <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+
+                <!-- Q&A Section (available during live recording) -->
+                {#if transcript.length > 0}
+                  <div class="mt-4 p-4 glass rounded-xl border border-phantom-ear-border">
+                    <div class="flex items-center gap-2 mb-3">
+                      <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Ask About This Recording</h3>
+                    </div>
+                    <form onsubmit={(e) => { e.preventDefault(); askQuestion(); }} class="flex gap-2">
+                      <input
+                        type="text"
+                        bind:value={question}
+                        placeholder="Ask a question about the transcript so far..."
+                        class="flex-1 px-3 py-2 text-sm bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
+                        disabled={isAsking}
+                      />
+                      <button
+                        type="submit"
+                        disabled={!question.trim() || isAsking}
+                        class="px-4 py-2 bg-gradient-accent rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-all hover-lift"
+                      >
+                        {#if isAsking}
+                          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                          </svg>
+                        {:else}
+                          Ask
+                        {/if}
+                      </button>
+                    </form>
+                    {#if answer}
+                      <div class="mt-3 p-3 bg-phantom-ear-surface/50 rounded-lg">
+                        <p class="text-sm text-phantom-ear-text leading-relaxed">{answer}</p>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {:else if isViewingPastMeeting}
+            <!-- PAST MEETING VIEW (Read-only) -->
+            <div class="flex-1 flex flex-col p-6 overflow-hidden">
+              <!-- Past Meeting Header -->
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 text-xs rounded bg-phantom-ear-surface text-phantom-ear-text-muted">Past Meeting</span>
+                  <h2 class="text-sm font-medium text-phantom-ear-text">
+                    {meetingsStore.activeMeeting?.title || 'Untitled Meeting'}
+                  </h2>
+                </div>
                 <div class="flex items-center gap-2">
                   {#if transcript.length > 0}
-                    <span class="text-xs text-sidecar-text-muted">{transcript.length} segments</span>
-                  {/if}
-                  {#if transcript.length > 0 && !isRecording}
                     <button
                       onclick={handleExportMeeting}
-                      class="px-2 py-1 text-xs rounded-md bg-sidecar-surface border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-accent transition-colors"
-                      title="Export transcript to clipboard"
+                      class="px-2 py-1 text-xs rounded-md bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-accent transition-colors"
                     >
                       {exportCopied ? 'Copied!' : 'Export'}
                     </button>
@@ -712,80 +1037,59 @@
                 </div>
               </div>
 
-              {#if !transcriptCollapsed}
-                <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-hidden shadow-glow-surface transition-all duration-200">
-                  {#if transcript.length === 0 && !summary && !answer}
-                    <div class="relative flex flex-col items-center justify-center h-full text-sidecar-text-muted overflow-hidden">
-                      <!-- Ambient PhantomEar background -->
-                      <img
-                        src="/PhantomEarNoBackground.png"
-                        alt=""
-                        aria-hidden="true"
-                        class="absolute inset-0 m-auto w-64 h-64 object-contain opacity-[0.04] blur-[1px] pointer-events-none select-none"
-                      />
-                      {#if isRecording}
-                        <p class="text-sm font-medium relative z-10">Listening...</p>
-                        <p class="text-xs mt-1 opacity-70 relative z-10">Speech will appear here in real-time</p>
-                      {:else}
-                        <!-- Scramble headline -->
-                        <p class="text-xl font-light tracking-wide relative z-10" aria-label="Always Listening. Never Seen.">
-                          {#if scrambleComplete}
-                            <span class="text-sidecar-text">{HEADLINE}</span>
-                          {:else}
-                            {#each scrambleOutput as ch}
-                              <span class={ch.scrambled ? 'text-sidecar-purple opacity-40' : 'text-sidecar-text'}>{ch.char}</span>
-                            {/each}
-                          {/if}
-                        </p>
-                        <p class="text-xs mt-3 opacity-50 relative z-10">Click record to begin</p>
-                      {/if}
+              <!-- Transcript -->
+              <div class="flex-1 flex flex-col min-h-0">
+                <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden">
+                  {#if transcript.length === 0}
+                    <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
+                      <p class="text-sm">No transcript available</p>
                     </div>
                   {:else}
-                    <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
+                    <div bind:this={transcriptContainer} class="p-4 space-y-1 overflow-y-auto h-full scroll-smooth">
                       {#each transcript as segment (segment.id)}
-                        <div class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-sidecar-surface/50 transition-colors">
-                          <span class="text-xs text-sidecar-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
-                          <p class="text-sm leading-relaxed text-sidecar-text">{segment.text}</p>
-                        </div>
+                        <EditableSegment
+                          {segment}
+                          {speakers}
+                          onUpdate={handleSegmentUpdate}
+                          onDelete={handleSegmentDelete}
+                          onSpeakersChange={loadSpeakers}
+                        />
                       {/each}
 
-                      <!-- Summary Display (inside scroll) -->
+                      <!-- Summary Display -->
                       {#if summary}
-                        <div class="mt-4 p-4 rounded-xl bg-sidecar-purple/5 border border-sidecar-purple/20">
+                        <div class="mt-4 p-4 rounded-xl bg-phantom-ear-purple/5 border border-phantom-ear-purple/20">
                           <div class="flex items-center gap-2 mb-3">
-                            <div class="w-5 h-5 rounded-full bg-sidecar-purple flex items-center justify-center">
+                            <div class="w-5 h-5 rounded-full bg-phantom-ear-purple flex items-center justify-center">
                               <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
                             </div>
-                            <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">Meeting Summary</h3>
+                            <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Meeting Summary</h3>
                           </div>
-
                           {#if summary.overview}
-                            <p class="text-sm text-sidecar-text leading-relaxed mb-4">{summary.overview}</p>
+                            <p class="text-sm text-phantom-ear-text leading-relaxed mb-4">{summary.overview}</p>
                           {/if}
-
                           {#if summary.key_points.length > 0}
                             <div class="mb-3">
-                              <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Key Points</h4>
+                              <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Key Points</h4>
                               <ul class="space-y-1">
                                 {#each summary.key_points as point}
-                                  <li class="flex items-start gap-2 text-sm text-sidecar-text">
-                                    <span class="text-sidecar-accent mt-1">&#8226;</span>
+                                  <li class="flex items-start gap-2 text-sm text-phantom-ear-text">
+                                    <span class="text-phantom-ear-accent mt-1">&#8226;</span>
                                     <span>{point}</span>
                                   </li>
                                 {/each}
                               </ul>
                             </div>
                           {/if}
-
                           {#if summary.action_items.length > 0}
                             <div>
-                              <h4 class="text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide mb-2">Action Items</h4>
+                              <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Action Items</h4>
                               <ul class="space-y-1">
                                 {#each summary.action_items as item}
-                                  <li class="flex items-start gap-2 text-sm text-sidecar-text">
-                                    <span class="text-sidecar-success mt-1">&#10003;</span>
+                                  <li class="flex items-start gap-2 text-sm text-phantom-ear-text">
+                                    <span class="text-phantom-ear-success mt-1">&#10003;</span>
                                     <span>{item}</span>
                                   </li>
                                 {/each}
@@ -794,125 +1098,94 @@
                           {/if}
                         </div>
                       {/if}
-
-                      <!-- Answer Display (inside scroll) -->
-                      {#if answer}
-                        <div class="mt-4 p-4 rounded-xl bg-sidecar-accent/5 border border-sidecar-accent/20">
-                          <div class="flex items-center gap-2 mb-2">
-                            <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
-                              <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                              </svg>
-                            </div>
-                            <h3 class="text-xs font-medium text-sidecar-text-muted uppercase tracking-wide">AI Answer</h3>
-                          </div>
-                          <p class="text-sm text-sidecar-text whitespace-pre-wrap leading-relaxed">{answer}</p>
-                        </div>
-                      {/if}
                     </div>
                   {/if}
                 </div>
-              {:else}
-                <div class="py-2 text-sm text-sidecar-text-muted">
-                  {transcript.length > 0 ? `${transcript.length} segments captured` : 'No transcript yet'}
-                </div>
-              {/if}
-            </div>
 
-            <!-- ChatGPT-style Input Bar -->
-            <div class="mt-4">
-              <form
-                onsubmit={(e) => {
-                  e.preventDefault();
-                  askQuestion();
-                }}
-                class="relative flex items-center"
-              >
-                <input
-                  type="text"
-                  bind:value={question}
-                  placeholder="Ask a question about the meeting..."
-                  disabled={transcript.length === 0}
-                  class="w-full pl-4 pr-28 py-3.5 glass border border-sidecar-border rounded-2xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-                <!-- Icons inside the input, right side -->
-                <div class="absolute right-2 flex items-center gap-1">
-                  <!-- Summary button -->
-                  <button
-                    type="button"
-                    onclick={generateSummary}
-                    disabled={isGeneratingSummary || transcript.length === 0}
-                    class="p-2 rounded-lg text-sidecar-text-muted hover:text-sidecar-purple hover:bg-sidecar-surface transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-sidecar-text-muted disabled:hover:bg-transparent"
-                    title="Generate summary"
-                  >
-                    {#if isGeneratingSummary}
-                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                <!-- Q&A Section -->
+                {#if transcript.length > 0}
+                  <div class="mt-4 p-4 glass rounded-xl border border-phantom-ear-border">
+                    <div class="flex items-center gap-2 mb-3">
+                      <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                    {:else}
-                      <!-- Document/summary icon -->
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
+                      <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Ask About This Meeting</h3>
+                    </div>
+                    <form onsubmit={(e) => { e.preventDefault(); askQuestion(); }} class="flex gap-2">
+                      <input
+                        type="text"
+                        bind:value={question}
+                        placeholder="Ask a question about this meeting..."
+                        class="flex-1 px-3 py-2 text-sm bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
+                        disabled={isAsking}
+                      />
+                      <button
+                        type="submit"
+                        disabled={!question.trim() || isAsking}
+                        class="px-4 py-2 bg-gradient-accent rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-all hover-lift"
+                      >
+                        {#if isAsking}
+                          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                          </svg>
+                        {:else}
+                          Ask
+                        {/if}
+                      </button>
+                    </form>
+                    {#if answer}
+                      <div class="mt-3 p-3 bg-phantom-ear-surface/50 rounded-lg">
+                        <p class="text-sm text-phantom-ear-text leading-relaxed">{answer}</p>
+                      </div>
                     {/if}
-                  </button>
-
-                  <!-- Send button -->
-                  <button
-                    type="submit"
-                    disabled={!question.trim() || isAsking || transcript.length === 0}
-                    class="p-2 rounded-xl bg-sidecar-text text-sidecar-bg hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
-                    title="Send question"
-                  >
-                    {#if isAsking}
-                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                      </svg>
-                    {:else}
-                      <!-- Arrow up icon -->
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                      </svg>
-                    {/if}
-                  </button>
-                </div>
-              </form>
+                  </div>
+                {/if}
+              </div>
             </div>
-          </div>
+          {/if}
 
         {:else if currentView === 'phomy'}
           <div class="flex-1 flex flex-col p-6 overflow-hidden">
             <!-- Phomy Header -->
             <div class="flex items-center gap-3 mb-4">
-              <div class="w-10 h-10 rounded-xl bg-sidecar-purple/20 flex items-center justify-center">
-                <svg class="w-5 h-5 text-sidecar-purple" fill="currentColor" viewBox="0 0 24 24">
+              <div class="w-10 h-10 rounded-xl bg-phantom-ear-purple/20 flex items-center justify-center">
+                <svg class="w-5 h-5 text-phantom-ear-purple" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                 </svg>
               </div>
               <div>
-                <h2 class="text-base font-semibold text-sidecar-text">Phomy</h2>
-                <p class="text-xs text-sidecar-text-muted">Your meeting memory</p>
+                <h2 class="text-base font-semibold text-phantom-ear-text">Phomy</h2>
+                <p class="text-xs text-phantom-ear-text-muted">Your meeting memory</p>
               </div>
               {#if embeddingDownloading}
-                <span class="ml-auto text-xs text-sidecar-text-muted flex items-center gap-1">
-                  <svg class="w-3 h-3 text-sidecar-purple opacity-50 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                <span class="ml-auto text-xs text-phantom-ear-text-muted flex items-center gap-1">
+                  <svg class="w-3 h-3 text-phantom-ear-purple opacity-50 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                   </svg>
                   Loading embeddings...
                 </span>
+              {:else if embeddingDownloadFailed}
+                <button
+                  onclick={openEmbeddingManualDownload}
+                  class="ml-auto text-xs text-phantom-ear-warning hover:text-phantom-ear-text transition-colors flex items-center gap-1"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  Download blocked - click for manual
+                </button>
               {:else if !embeddingModelLoaded}
-                <span class="ml-auto text-xs text-sidecar-text-muted">Embedding model not loaded</span>
+                <span class="ml-auto text-xs text-phantom-ear-text-muted">Embedding model not loaded</span>
               {/if}
             </div>
 
             <!-- Chat History -->
-            <div class="flex-1 glass rounded-xl border border-sidecar-border overflow-y-auto p-4 space-y-4">
+            <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-y-auto p-4 space-y-4">
               {#if phomyHistory.length === 0}
-                <div class="flex flex-col items-center justify-center h-full text-sidecar-text-muted">
-                  <div class="w-14 h-14 mb-4 rounded-2xl bg-sidecar-purple/10 flex items-center justify-center">
-                    <svg class="w-7 h-7 opacity-40 text-sidecar-purple" fill="currentColor" viewBox="0 0 24 24">
+                <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
+                  <div class="w-14 h-14 mb-4 rounded-2xl bg-phantom-ear-purple/10 flex items-center justify-center">
+                    <svg class="w-7 h-7 opacity-40 text-phantom-ear-purple" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                     </svg>
                   </div>
@@ -923,18 +1196,18 @@
                 {#each phomyHistory as msg}
                   {#if msg.role === 'user'}
                     <div class="flex justify-end">
-                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-sidecar-accent text-white text-sm">
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-phantom-ear-accent text-white text-sm">
                         {msg.text}
                       </div>
                     </div>
                   {:else}
                     <div class="space-y-3">
-                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-sidecar-surface border border-sidecar-border text-sm text-sidecar-text whitespace-pre-wrap">
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-phantom-ear-surface border border-phantom-ear-border text-sm text-phantom-ear-text whitespace-pre-wrap">
                         {msg.text}
                       </div>
                       {#if msg.refs && msg.refs.length > 0}
                         <div class="space-y-2 max-w-[80%]">
-                          <p class="text-xs text-sidecar-text-muted uppercase tracking-wide font-medium">References</p>
+                          <p class="text-xs text-phantom-ear-text-muted uppercase tracking-wide font-medium">References</p>
                           {#each msg.refs.slice(0, 5) as ref}
                             <ReferenceCard result={ref} onSelect={handleSelectMeeting} />
                           {/each}
@@ -945,8 +1218,8 @@
                 {/each}
 
                 {#if phomyIsAsking}
-                  <div class="flex items-center gap-2 px-4 py-2 text-sidecar-text-muted text-sm">
-                    <svg class="w-4 h-4 text-sidecar-purple animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                  <div class="flex items-center gap-2 px-4 py-2 text-phantom-ear-text-muted text-sm">
+                    <svg class="w-4 h-4 text-phantom-ear-purple animate-pulse" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
                     </svg>
                     Thinking...
@@ -960,7 +1233,7 @@
               <div class="flex justify-center mt-2">
                 <button
                   onclick={expandPhomyContext}
-                  class="px-3 py-1.5 text-xs rounded-lg bg-sidecar-surface border border-sidecar-border text-sidecar-text-muted hover:text-sidecar-text hover:border-sidecar-purple/40 transition-colors"
+                  class="px-3 py-1.5 text-xs rounded-lg bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-purple/40 transition-colors"
                 >
                   Show more context ({phomyContextLimit + 10} chunks)
                 </button>
@@ -981,13 +1254,13 @@
                   bind:value={phomyQuestion}
                   placeholder={embeddingModelLoaded ? "Ask Phomy about your meetings..." : "Loading embedding model..."}
                   disabled={!embeddingModelLoaded}
-                  class="w-full pl-4 pr-14 py-3.5 glass border border-sidecar-border rounded-2xl text-sm text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-purple/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="w-full pl-4 pr-14 py-3.5 glass border border-phantom-ear-border rounded-2xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-purple/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <div class="absolute right-2">
                   <button
                     type="submit"
                     disabled={!phomyQuestion.trim() || phomyIsAsking || !embeddingModelLoaded}
-                    class="p-2 rounded-xl bg-sidecar-purple text-white hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
+                    class="p-2 rounded-xl bg-phantom-ear-purple text-white hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
                     title="Ask Phomy"
                   >
                     {#if phomyIsAsking}
@@ -1007,7 +1280,7 @@
           </div>
 
         {:else if currentView === 'settings'}
-          <div class="flex-1 overflow-y-auto">
+          <div class="flex-1 min-h-0 overflow-hidden">
             <Settings onClose={handleSettingsSaved} inline={true} />
           </div>
         {/if}
@@ -1018,39 +1291,133 @@
   <!-- Download Progress Overlay -->
   {#if downloadingModel}
     <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div class="bg-sidecar-surface rounded-2xl border border-sidecar-border p-6 w-80 shadow-glow-surface">
+      <div class="bg-phantom-ear-surface rounded-2xl border border-phantom-ear-border p-6 w-80 shadow-glow-surface">
         <div class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 rounded-xl bg-sidecar-accent/20 flex items-center justify-center">
-            <svg class="w-5 h-5 text-sidecar-accent animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-10 h-10 rounded-xl bg-phantom-ear-accent/20 flex items-center justify-center">
+            <svg class="w-5 h-5 text-phantom-ear-accent animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
           </div>
           <div>
-            <h3 class="text-sm font-semibold text-sidecar-text">Downloading Model</h3>
-            <p class="text-xs text-sidecar-text-muted capitalize">{downloadingModel}</p>
+            <h3 class="text-sm font-semibold text-phantom-ear-text">Downloading Model</h3>
+            <p class="text-xs text-phantom-ear-text-muted capitalize">{downloadingModel}</p>
           </div>
         </div>
 
         {#if downloadProgress}
           <div class="space-y-2">
-            <div class="h-2 bg-sidecar-border rounded-full overflow-hidden">
+            <div class="h-2 bg-phantom-ear-border rounded-full overflow-hidden">
               <div
                 class="h-full bg-gradient-accent transition-all duration-300"
                 style="width: {downloadProgress.percentage}%"
               ></div>
             </div>
-            <div class="flex justify-between text-xs text-sidecar-text-muted">
+            <div class="flex justify-between text-xs text-phantom-ear-text-muted">
               <span>{downloadProgress.status}</span>
               <span>{downloadProgress.percentage.toFixed(0)}%</span>
             </div>
           </div>
         {:else}
           <div class="flex items-center justify-center py-2">
-            <div class="w-5 h-5 border-2 border-sidecar-accent border-t-transparent rounded-full animate-spin"></div>
-            <span class="ml-2 text-sm text-sidecar-text-muted">Preparing...</span>
+            <div class="w-5 h-5 border-2 border-phantom-ear-accent border-t-transparent rounded-full animate-spin"></div>
+            <span class="ml-2 text-sm text-phantom-ear-text-muted">Preparing...</span>
           </div>
         {/if}
       </div>
     </div>
   {/if}
+
+  <!-- Embedding Model Manual Download Modal -->
+  {#if showEmbeddingManualDownload}
+    <div
+      class="fixed inset-0 bg-black/70 backdrop-blur-md z-40"
+      onclick={() => showEmbeddingManualDownload = false}
+      onkeydown={(e) => e.key === "Escape" && (showEmbeddingManualDownload = false)}
+      role="button"
+      tabindex="-1"
+    ></div>
+    <div class="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[450px] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-phantom-ear-border/50">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-phantom-ear-purple/20 flex items-center justify-center">
+            <svg class="w-4 h-4 text-phantom-ear-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </div>
+          <h2 class="text-lg font-semibold text-phantom-ear-text">Manual Embedding Model Download</h2>
+        </div>
+        <button
+          onclick={() => showEmbeddingManualDownload = false}
+          class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors"
+        >
+          <svg class="w-5 h-5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="p-6 space-y-4">
+        <p class="text-sm text-phantom-ear-text-muted">
+          The automatic download was blocked by a corporate firewall. Download the files manually and import them below.
+        </p>
+
+        <div class="bg-phantom-ear-surface/50 border border-phantom-ear-border/50 rounded-xl p-4 space-y-3">
+          <div class="flex items-start gap-3">
+            <div class="w-6 h-6 rounded-full bg-phantom-ear-purple/20 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-xs font-bold text-phantom-ear-purple">1</span>
+            </div>
+            <div class="flex-1">
+              <p class="text-sm text-phantom-ear-text">Download these two files:</p>
+              <ul class="mt-2 space-y-1 text-xs text-phantom-ear-text-muted">
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-phantom-ear-purple"></span>
+                  model.onnx (~33MB)
+                </li>
+                <li class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full bg-phantom-ear-purple"></span>
+                  tokenizer.json (~700KB)
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="flex items-start gap-3">
+            <div class="w-6 h-6 rounded-full bg-phantom-ear-purple/20 flex items-center justify-center shrink-0 mt-0.5">
+              <span class="text-xs font-bold text-phantom-ear-purple">2</span>
+            </div>
+            <p class="text-sm text-phantom-ear-text-muted text-left">
+              Click <span class="text-phantom-ear-text">Import Files</span> below and select both downloaded files (or a .zip containing them)
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <button
+            onclick={openEmbeddingManualDownload}
+            class="flex-1 py-2.5 px-4 border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-text-muted transition-colors"
+          >
+            Re-open Links
+          </button>
+          <button
+            onclick={importEmbeddingModel}
+            disabled={embeddingImporting}
+            class="flex-1 py-2.5 px-4 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift btn-shine disabled:opacity-50"
+          >
+            {#if embeddingImporting}
+              Importing...
+            {:else}
+              Import Files
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 {/if}
+
+<!-- Search Overlay -->
+<SearchOverlay 
+  isOpen={showSearchOverlay} 
+  onClose={() => showSearchOverlay = false} 
+/>

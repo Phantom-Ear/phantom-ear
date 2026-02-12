@@ -17,6 +17,7 @@
     onTogglePinMeeting,
     onDeleteMeeting,
     onSearch,
+    onOpenSearchOverlay,
   }: {
     collapsed?: boolean;
     currentView?: View;
@@ -31,15 +32,79 @@
     onTogglePinMeeting: (id: string) => void;
     onDeleteMeeting: (id: string) => void;
     onSearch?: (query: string) => void;
+    onOpenSearchOverlay?: () => void;
   } = $props();
 
   let localSearchQuery = $state(searchQuery);
+  let selectedIndex = $state(-1); // -1 means no selection
+  let sidebarEl: HTMLElement | null = null;
+
+  // Combined list of all meetings for keyboard navigation
+  const allMeetings = $derived([...pinnedMeetings, ...recentMeetings]);
 
   function handleSearchInput(e: Event) {
     const value = (e.target as HTMLInputElement).value;
     localSearchQuery = value;
     onSearch?.(value);
   }
+
+  // Clear keyboard selection when clicking on a meeting
+  function handleMeetingClick(callback: () => void) {
+    selectedIndex = -1; // Clear keyboard selection
+    callback();
+  }
+
+  // Handle keyboard navigation
+  function handleKeydown(e: KeyboardEvent) {
+    // Skip if in input field
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+    if (e.key === 'ArrowDown' || e.key === 'j') {
+      e.preventDefault();
+      if (allMeetings.length === 0) return;
+      selectedIndex = Math.min(selectedIndex + 1, allMeetings.length - 1);
+      scrollSelectedIntoView();
+    } else if (e.key === 'ArrowUp' || e.key === 'k') {
+      e.preventDefault();
+      if (allMeetings.length === 0) return;
+      selectedIndex = Math.max(selectedIndex - 1, 0);
+      scrollSelectedIntoView();
+    } else if (e.key === 'Enter' && selectedIndex >= 0) {
+      e.preventDefault();
+      const meeting = allMeetings[selectedIndex];
+      if (meeting) {
+        onSelectMeeting(meeting.id);
+        selectedIndex = -1; // Clear after selection
+      }
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIndex >= 0) {
+      e.preventDefault();
+      const meeting = allMeetings[selectedIndex];
+      if (meeting) {
+        onDeleteMeeting(meeting.id);
+        // Adjust selection after deletion
+        if (selectedIndex >= allMeetings.length - 1) {
+          selectedIndex = Math.max(0, allMeetings.length - 2);
+        }
+      }
+    }
+  }
+
+  function scrollSelectedIntoView() {
+    if (sidebarEl) {
+      const selected = sidebarEl.querySelector('.meeting-item-selected');
+      if (selected) {
+        selected.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }
+
+  // Reset selection when meetings change
+  $effect(() => {
+    if (selectedIndex >= allMeetings.length) {
+      selectedIndex = Math.max(-1, allMeetings.length - 1);
+    }
+  });
 
   const navItems: { view: View; label: string; icon: string }[] = [
     { view: 'home', label: 'Home', icon: 'home' },
@@ -49,13 +114,16 @@
 </script>
 
 <aside
-  class="flex flex-col h-full bg-sidecar-surface border-r border-sidecar-border transition-all duration-200 ease-in-out {collapsed ? 'w-16' : 'w-64'}"
+  bind:this={sidebarEl}
+  onkeydown={handleKeydown}
+  tabindex="0"
+  class="flex flex-col h-full bg-phantom-ear-surface border-r border-phantom-ear-border transition-all duration-200 ease-in-out {collapsed ? 'w-16' : 'w-64'} focus:outline-none"
 >
   <!-- Header -->
-  <div class="flex items-center gap-3 px-4 py-4 border-b border-sidecar-border/50">
+  <div class="flex items-center gap-3 px-4 py-4 border-b border-phantom-ear-border/50">
     <button
       onclick={onToggle}
-      class="p-2 rounded-lg hover:bg-sidecar-surface-hover transition-colors text-sidecar-text-muted"
+      class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors text-phantom-ear-text-muted"
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -63,7 +131,7 @@
       </svg>
     </button>
     {#if !collapsed}
-      <span class="font-semibold text-sidecar-text">PhantomEar</span>
+      <span class="font-semibold text-phantom-ear-text">PhantomEar</span>
     {/if}
   </div>
 
@@ -72,7 +140,7 @@
     {#each navItems as item}
       <button
         onclick={() => onNavigate(item.view)}
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {currentView === item.view ? 'bg-sidecar-accent/10 text-sidecar-accent' : 'text-sidecar-text-muted hover:bg-sidecar-surface-hover hover:text-sidecar-text'}"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {currentView === item.view ? 'bg-phantom-ear-accent/10 text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text'}"
         title={collapsed ? item.label : undefined}
       >
         {#if item.icon === 'home'}
@@ -100,7 +168,7 @@
   {#if !collapsed}
     <div class="px-3 pb-2">
       <div class="relative">
-        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-sidecar-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <input
@@ -108,8 +176,11 @@
           placeholder="Search meetings..."
           value={localSearchQuery}
           oninput={handleSearchInput}
-          class="w-full pl-8 pr-3 py-1.5 text-xs bg-sidecar-bg border border-sidecar-border rounded-lg text-sidecar-text placeholder:text-sidecar-text-muted focus:outline-none focus:border-sidecar-accent transition-colors"
+          onclick={() => onOpenSearchOverlay?.()}
+          readonly
+          class="w-full pl-8 pr-3 py-1.5 text-xs bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors cursor-pointer"
         />
+        <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-phantom-ear-text-muted bg-phantom-ear-surface-hover px-1.5 py-0.5 rounded">⌘K</span>
       </div>
     </div>
   {/if}
@@ -119,18 +190,19 @@
     {#if pinnedMeetings.length > 0}
       <div class="mb-4">
         {#if !collapsed}
-          <h3 class="px-3 py-2 text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide">Pinned</h3>
+          <h3 class="px-3 py-2 text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide">Pinned</h3>
         {/if}
         <div class="space-y-0.5">
-          {#each pinnedMeetings as meeting (meeting.id)}
+          {#each pinnedMeetings as meeting, index (meeting.id)}
             <MeetingItem
               {meeting}
               isActive={meeting.id === activeMeetingId}
+              isKeyboardSelected={selectedIndex === index}
               {collapsed}
-              onSelect={() => onSelectMeeting(meeting.id)}
-              onRename={(title) => onRenameMeeting(meeting.id, title)}
-              onTogglePin={() => onTogglePinMeeting(meeting.id)}
-              onDelete={() => onDeleteMeeting(meeting.id)}
+              onSelect={() => handleMeetingClick(() => onSelectMeeting(meeting.id))}
+              onRename={(title) => { selectedIndex = -1; onRenameMeeting(meeting.id, title); }}
+              onTogglePin={() => { selectedIndex = -1; onTogglePinMeeting(meeting.id); }}
+              onDelete={() => { selectedIndex = -1; onDeleteMeeting(meeting.id); }}
             />
           {/each}
         </div>
@@ -140,18 +212,19 @@
     {#if recentMeetings.length > 0}
       <div>
         {#if !collapsed}
-          <h3 class="px-3 py-2 text-xs font-semibold text-sidecar-text-muted uppercase tracking-wide">Recent</h3>
+          <h3 class="px-3 py-2 text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide">Recent</h3>
         {/if}
         <div class="space-y-0.5">
-          {#each recentMeetings as meeting (meeting.id)}
+          {#each recentMeetings as meeting, index (meeting.id)}
             <MeetingItem
               {meeting}
               isActive={meeting.id === activeMeetingId}
+              isKeyboardSelected={selectedIndex === pinnedMeetings.length + index}
               {collapsed}
-              onSelect={() => onSelectMeeting(meeting.id)}
-              onRename={(title) => onRenameMeeting(meeting.id, title)}
-              onTogglePin={() => onTogglePinMeeting(meeting.id)}
-              onDelete={() => onDeleteMeeting(meeting.id)}
+              onSelect={() => handleMeetingClick(() => onSelectMeeting(meeting.id))}
+              onRename={(title) => { selectedIndex = -1; onRenameMeeting(meeting.id, title); }}
+              onTogglePin={() => { selectedIndex = -1; onTogglePinMeeting(meeting.id); }}
+              onDelete={() => { selectedIndex = -1; onDeleteMeeting(meeting.id); }}
             />
           {/each}
         </div>
@@ -160,17 +233,17 @@
 
     {#if pinnedMeetings.length === 0 && recentMeetings.length === 0 && !collapsed}
       <div class="px-3 py-4 text-center">
-        <p class="text-xs text-sidecar-text-muted">No meetings yet</p>
-        <p class="text-xs text-sidecar-text-muted mt-1">Start recording to create one</p>
+        <p class="text-xs text-phantom-ear-text-muted">No meetings yet</p>
+        <p class="text-xs text-phantom-ear-text-muted mt-1">Start recording to create one</p>
       </div>
     {/if}
   </div>
 
   <!-- Footer: Theme Toggle -->
-  <div class="px-2 py-3 border-t border-sidecar-border/50">
+  <div class="px-2 py-3 border-t border-phantom-ear-border/50">
     <button
       onclick={() => themeStore.toggleTheme()}
-      class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sidecar-text-muted hover:bg-sidecar-surface-hover hover:text-sidecar-text transition-colors"
+      class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text transition-colors"
       title={collapsed ? (themeStore.theme === 'dark' ? 'Light mode' : 'Dark mode') : undefined}
     >
       {#if themeStore.theme === 'dark'}

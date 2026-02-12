@@ -19,24 +19,24 @@
 
 <button
   onclick={() => onSelect(result.meeting_id)}
-  class="w-full text-left p-3 rounded-lg bg-sidecar-surface/50 border border-sidecar-border hover:border-sidecar-accent/40 transition-colors group"
+  class="w-full text-left p-3 rounded-lg bg-phantom-ear-surface/50 border border-phantom-ear-border hover:border-phantom-ear-accent/40 transition-colors group"
 >
   <div class="flex items-center justify-between mb-1">
-    <span class="text-xs font-medium text-sidecar-accent truncate max-w-[70%]">
+    <span class="text-xs font-medium text-phantom-ear-accent truncate max-w-[70%]">
       {result.meeting_title}
     </span>
-    <span class="text-[10px] text-sidecar-text-muted font-mono">{result.time_label}</span>
+    <span class="text-[10px] text-phantom-ear-text-muted font-mono">{result.time_label}</span>
   </div>
-  <p class="text-sm text-sidecar-text leading-relaxed">
+  <p class="text-sm text-phantom-ear-text leading-relaxed">
     {truncate(result.text, 120)}
   </p>
   <div class="mt-2 flex items-center gap-2">
-    <div class="flex-1 h-1 rounded-full bg-sidecar-border overflow-hidden">
+    <div class="flex-1 h-1 rounded-full bg-phantom-ear-border overflow-hidden">
       <div
-        class="h-full bg-sidecar-accent/60 rounded-full"
+        class="h-full bg-phantom-ear-accent/60 rounded-full"
         style="width: {relevance}%"
       ></div>
     </div>
-    <span class="text-[10px] text-sidecar-text-muted">{relevance}%</span>
+    <span class="text-[10px] text-phantom-ear-text-muted">{relevance}%</span>
   </div>
 </button>
