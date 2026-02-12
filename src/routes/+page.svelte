@@ -11,6 +11,7 @@
   import TranscriptTimeline from "$lib/components/TranscriptTimeline.svelte";
   import HomeMetrics from "$lib/components/HomeMetrics.svelte";
   import EditableSegment from "$lib/components/EditableSegment.svelte";
+  import MeetingNotification from "$lib/components/MeetingNotification.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
   import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
   import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker } from "$lib/types";
@@ -97,6 +98,9 @@
   // Keyboard shortcut state
   let sidebarFocused = $state(false);
 
+  // Meeting detection state
+  let autoDetectMeetings = $state(false);
+
   // Derived: Are we viewing a past meeting (not the live recording)?
   const isViewingPastMeeting = $derived(
     meetingsStore.activeMeetingId !== null &&
@@ -171,6 +175,7 @@
         models = loadedModels;
         llmProvider = settings.llm_provider;
         llmModelName = settings.ollama_model || "";
+        autoDetectMeetings = settings.auto_detect_meetings;
       } catch (e) {
         console.error("Failed to load settings:", e);
       }
@@ -191,6 +196,16 @@
 
       // Auto-load or download embedding model
       initEmbeddingModel();
+
+      // Start meeting detection if enabled
+      if (autoDetectMeetings) {
+        try {
+          await invoke("start_meeting_detection");
+          console.log("Meeting detection started");
+        } catch (e) {
+          console.error("Failed to start meeting detection:", e);
+        }
+      }
     } catch (e) {
       console.error("Failed to check model status:", e);
       needsSetup = true;
@@ -255,6 +270,8 @@
     }
     // Remove keyboard event listener
     window.removeEventListener('keydown', handleGlobalKeydown);
+    // Stop meeting detection
+    invoke("stop_meeting_detection").catch(() => {});
   });
 
   // Global keyboard shortcut handler
@@ -1417,7 +1434,15 @@
 {/if}
 
 <!-- Search Overlay -->
-<SearchOverlay 
-  isOpen={showSearchOverlay} 
-  onClose={() => showSearchOverlay = false} 
+<SearchOverlay
+  isOpen={showSearchOverlay}
+  onClose={() => showSearchOverlay = false}
 />
+
+<!-- Meeting Detection Notification -->
+{#if autoDetectMeetings}
+  <MeetingNotification
+    onStartRecording={toggleRecording}
+    {isRecording}
+  />
+{/if}

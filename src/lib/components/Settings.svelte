@@ -234,6 +234,26 @@
           </p>
         </div>
 
+        <!-- Auto-detect Meetings -->
+        <div>
+          <label class="flex items-center justify-between cursor-pointer">
+            <div>
+              <span class="block text-sm font-medium text-phantom-ear-text">Auto-detect Meetings</span>
+              <span class="block text-xs text-phantom-ear-text-muted mt-0.5">
+                Get notified when Zoom, Teams, or other meeting apps start
+              </span>
+            </div>
+            <div class="relative">
+              <input
+                type="checkbox"
+                bind:checked={settings.auto_detect_meetings}
+                class="sr-only peer"
+              />
+              <div class="w-11 h-6 bg-phantom-ear-surface rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-phantom-ear-text-muted after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gradient-accent peer-checked:after:bg-white"></div>
+            </div>
+          </label>
+        </div>
+
         <!-- Audio Input Device -->
         <div>
           <label class="block text-sm font-medium text-phantom-ear-text mb-2">
