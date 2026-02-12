@@ -1,9 +1,8 @@
 // Meeting detection module
 // Detect running meeting applications (Zoom, Teams, Google Meet)
 
-use anyhow::Result;
-
 /// Known meeting application process names
+#[allow(dead_code)]
 const MEETING_APPS: &[(&str, &str)] = &[
     ("zoom.us", "Zoom"),
     ("Zoom", "Zoom"),
@@ -16,6 +15,7 @@ const MEETING_APPS: &[(&str, &str)] = &[
 ];
 
 pub struct MeetingDetector {
+    #[allow(dead_code)]
     last_detected: Option<String>,
 }
 
