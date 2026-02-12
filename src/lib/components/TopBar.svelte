@@ -17,6 +17,8 @@
     isPaused = false,
     onToggleRecording,
     onTogglePause,
+    showLiveIndicator = false,
+    onReturnToLive,
   }: {
     language?: string;
     currentModel?: string;
@@ -32,6 +34,8 @@
     isPaused?: boolean;
     onToggleRecording: () => void;
     onTogglePause: () => void;
+    showLiveIndicator?: boolean;
+    onReturnToLive?: () => void;
   } = $props();
 
   function formatDuration(seconds: number): string {
@@ -90,51 +94,68 @@
 
 <header class="flex items-center justify-between px-4 py-3 border-b border-phantom-ear-border/50 bg-phantom-ear-bg">
 
-  <!-- Left: Recording Controls (when recording) -->
+  <!-- Left: Recording Controls or Live Indicator -->
   <div class="flex items-center gap-3">
     {#if isRecording}
-      <!-- Pulsing red dot + timer -->
-      <div class="flex items-center gap-2">
-        <div class="w-2.5 h-2.5 rounded-full bg-phantom-ear-danger {isPaused ? 'opacity-40' : 'animate-pulse-recording'}"></div>
-        <span class="text-sm font-mono font-semibold {isPaused ? 'text-phantom-ear-text-muted' : 'text-phantom-ear-danger'}">
-          {isPaused ? 'Paused' : formatDuration(recordingDuration)}
-        </span>
-      </div>
-
-      <!-- Audio level indicator -->
-      {#if !isPaused}
-        <AudioLevelIndicator />
-      {/if}
-
-      <!-- Pause/Resume button -->
-      <button
-        onclick={onTogglePause}
-        class="p-1.5 rounded-lg hover:bg-phantom-ear-surface transition-colors text-phantom-ear-text-muted hover:text-phantom-ear-text"
-        title={isPaused ? 'Resume' : 'Pause'}
-      >
-        {#if isPaused}
-          <!-- Play icon -->
-          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z"/>
+      {#if showLiveIndicator}
+        <!-- Recording but NOT on live view - show "Return to Live" button -->
+        <button
+          onclick={onReturnToLive}
+          class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-phantom-ear-danger/10 border border-phantom-ear-danger/30 hover:bg-phantom-ear-danger/15 hover:border-phantom-ear-danger/50 transition-colors"
+          title="Return to live recording"
+        >
+          <span class="w-2 h-2 rounded-full bg-phantom-ear-danger animate-pulse"></span>
+          <span class="text-xs font-medium text-phantom-ear-danger">Live</span>
+          <span class="text-xs font-mono text-phantom-ear-danger/80">{formatDuration(recordingDuration)}</span>
+          <svg class="w-3 h-3 text-phantom-ear-danger/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
-        {:else}
-          <!-- Pause icon -->
-          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-          </svg>
+        </button>
+      {:else}
+        <!-- On live view - show full recording controls -->
+        <!-- Pulsing red dot + timer -->
+        <div class="flex items-center gap-2">
+          <div class="w-2.5 h-2.5 rounded-full bg-phantom-ear-danger {isPaused ? 'opacity-40' : 'animate-pulse-recording'}"></div>
+          <span class="text-sm font-mono font-semibold {isPaused ? 'text-phantom-ear-text-muted' : 'text-phantom-ear-danger'}">
+            {isPaused ? 'Paused' : formatDuration(recordingDuration)}
+          </span>
+        </div>
+
+        <!-- Audio level indicator -->
+        {#if !isPaused}
+          <AudioLevelIndicator />
         {/if}
-      </button>
 
-      <!-- Stop button -->
-      <button
-        onclick={onToggleRecording}
-        class="p-1.5 rounded-lg bg-phantom-ear-danger/20 hover:bg-phantom-ear-danger/30 transition-colors text-phantom-ear-danger"
-        title="Stop recording"
-      >
-        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-          <rect x="6" y="6" width="12" height="12" rx="2" />
-        </svg>
-      </button>
+        <!-- Pause/Resume button -->
+        <button
+          onclick={onTogglePause}
+          class="p-1.5 rounded-lg hover:bg-phantom-ear-surface transition-colors text-phantom-ear-text-muted hover:text-phantom-ear-text"
+          title={isPaused ? 'Resume' : 'Pause'}
+        >
+          {#if isPaused}
+            <!-- Play icon -->
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          {:else}
+            <!-- Pause icon -->
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+            </svg>
+          {/if}
+        </button>
+
+        <!-- Stop button -->
+          <button
+          onclick={onToggleRecording}
+          class="p-1.5 rounded-lg bg-phantom-ear-danger/20 hover:bg-phantom-ear-danger/30 transition-colors text-phantom-ear-danger"
+          title="Stop recording"
+        >
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+          </svg>
+        </button>
+      {/if}
     {/if}
   </div>
 

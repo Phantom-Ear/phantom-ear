@@ -15,7 +15,11 @@ pub mod transcription;
 use commands::{AppState, Settings};
 use std::sync::Arc;
 use storage::Database;
-use tauri::Manager;
+use tauri::{
+    Emitter, Manager, RunEvent, WindowEvent,
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+};
 use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -54,6 +58,14 @@ pub fn run() {
             commands::delete_meeting,
             commands::search_meetings,
             commands::export_meeting,
+            // Segment editing commands
+            commands::update_segment,
+            commands::delete_segment,
+            // Speaker commands
+            commands::list_speakers,
+            commands::create_speaker,
+            commands::update_speaker,
+            commands::delete_speaker,
             // Phomy assistant
             commands::phomy_ask,
             // Embedding commands
@@ -113,8 +125,66 @@ pub fn run() {
             };
 
             app.manage(state);
+
+            // Setup system tray
+            let toggle_item = MenuItem::with_id(app, "toggle", "Start Recording", true, None::<&str>)?;
+            let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit PhantomEar", true, None::<&str>)?;
+
+            let tray_menu = Menu::with_items(app, &[&toggle_item, &show_item, &quit_item])?;
+
+            let _tray = TrayIconBuilder::with_id("main-tray")
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app_handle: &tauri::AppHandle, event| {
+                    match event.id.as_ref() {
+                        "toggle" => {
+                            // Emit event to frontend to toggle recording
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.emit("tray-toggle-recording", ());
+                            }
+                        }
+                        "show" => {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app_handle.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray_icon: &tauri::tray::TrayIcon, event| {
+                    // Show window on left click
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        if let Some(window) = tray_icon.app_handle().get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            log::info!("System tray initialized");
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Handle window close - minimize to tray instead of quitting
+            if let RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } = event {
+                if label == "main" {
+                    // Prevent the window from being destroyed
+                    api.prevent_close();
+                    // Hide the window instead
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                    log::info!("Window hidden to tray");
+                }
+            }
+        });
 }

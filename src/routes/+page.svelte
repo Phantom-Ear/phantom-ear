@@ -9,9 +9,11 @@
   import ReferenceCard from "$lib/components/ReferenceCard.svelte";
   import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import TranscriptTimeline from "$lib/components/TranscriptTimeline.svelte";
+  import HomeMetrics from "$lib/components/HomeMetrics.svelte";
+  import EditableSegment from "$lib/components/EditableSegment.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
   import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
-  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult } from "$lib/types";
+  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker } from "$lib/types";
 
   interface DownloadProgress {
     model_name: string;
@@ -30,6 +32,9 @@
 
   // Pause state
   let isPaused = $state(false);
+
+  // Track the meeting ID that is currently being recorded (separate from active/viewed meeting)
+  let liveRecordingMeetingId = $state<string | null>(null);
 
   // Q&A state
   let question = $state("");
@@ -73,6 +78,9 @@
   // Export state
   let exportCopied = $state(false);
 
+  // Speakers state
+  let speakers = $state<Speaker[]>([]);
+
   // Splash screen state
   let showSplash = $state(true);
   let splashFadingOut = $state(false);
@@ -88,6 +96,41 @@
 
   // Keyboard shortcut state
   let sidebarFocused = $state(false);
+
+  // Derived: Are we viewing a past meeting (not the live recording)?
+  const isViewingPastMeeting = $derived(
+    meetingsStore.activeMeetingId !== null &&
+    meetingsStore.activeMeetingId !== liveRecordingMeetingId &&
+    currentView === 'home'
+  );
+
+  // Derived: Should show recording indicator (recording AND navigated away from live view)?
+  const showRecordingIndicator = $derived(
+    isRecording && (currentView !== 'home' || isViewingPastMeeting)
+  );
+
+  // Return to live recording
+  function returnToLiveRecording() {
+    // First switch view to home
+    currentView = 'home';
+
+    // Set active meeting to the live recording meeting
+    // This ensures isViewingPastMeeting becomes false
+    if (liveRecordingMeetingId) {
+      meetingsStore.setActive(liveRecordingMeetingId);
+      meetingsStore.setActiveTranscript(transcript);
+    } else {
+      meetingsStore.clearActive();
+    }
+
+    // Scroll transcript to bottom after DOM updates
+    // Use requestAnimationFrame to ensure render is complete
+    requestAnimationFrame(() => {
+      scrollTranscriptToBottom();
+      // Additional scroll attempt for reliability
+      setTimeout(() => scrollTranscriptToBottom(), 150);
+    });
+  }
 
   const languageNames: Record<string, string> = {
     auto: "Auto-detect",
@@ -109,6 +152,7 @@
   // Timer and event listener
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let unlistenTranscription: UnlistenFn | null = null;
+  let unlistenTray: UnlistenFn | null = null;
   let transcriptContainer: HTMLDivElement | null = null;
 
   onMount(async () => {
@@ -131,8 +175,9 @@
         console.error("Failed to load settings:", e);
       }
 
-      // Load meetings from DB
+      // Load meetings and speakers from DB
       await meetingsStore.loadMeetings();
+      await loadSpeakers();
 
       // If model is downloaded, load it into memory
       if (status.whisper_downloaded) {
@@ -156,6 +201,11 @@
 
     // Register global keyboard shortcuts
     window.addEventListener('keydown', handleGlobalKeydown);
+
+    // Listen for system tray toggle recording event
+    unlistenTray = await listen<void>("tray-toggle-recording", () => {
+      toggleRecording();
+    });
   });
 
   // Splash: logo fly-in (0.6s) + hold (0.6s) = ~1.2s minimum
@@ -199,6 +249,9 @@
     }
     if (unlistenDownload) {
       unlistenDownload();
+    }
+    if (unlistenTray) {
+      unlistenTray();
     }
     // Remove keyboard event listener
     window.removeEventListener('keydown', handleGlobalKeydown);
@@ -273,11 +326,16 @@
       // Add to local transcript
       transcript = [...transcript, segment];
 
-      // Also add to active meeting (optimistic UI)
-      meetingsStore.addLocalSegment(segment);
+      // Only add to meeting store if viewing the live recording (not a past meeting)
+      // This prevents segments from appearing in old meetings when navigating during recording
+      if (meetingsStore.activeMeetingId === liveRecordingMeetingId) {
+        meetingsStore.addLocalSegment(segment);
+      }
 
-      // Auto-scroll to bottom
-      scrollTranscriptToBottom();
+      // Auto-scroll to bottom (only if viewing the live recording)
+      if (meetingsStore.activeMeetingId === liveRecordingMeetingId) {
+        scrollTranscriptToBottom();
+      }
     });
   }
 
@@ -304,6 +362,7 @@
       // Stop recording
       isRecording = false;
       isPaused = false;
+      liveRecordingMeetingId = null;
 
       // Stop the timer
       if (timerInterval) {
@@ -342,6 +401,7 @@
         // start_recording now returns meeting ID
         const meetingId = await invoke<string>("start_recording");
         isRecording = true;
+        liveRecordingMeetingId = meetingId;
 
         // Set active meeting and refresh list
         meetingsStore.setActive(meetingId);
@@ -579,6 +639,18 @@
 
   function handleNavigate(view: View) {
     currentView = view;
+    // When navigating to Home, clear past meeting state (unless actively recording)
+    if (view === 'home') {
+      if (isRecording && liveRecordingMeetingId) {
+        // If recording, switch back to live view
+        meetingsStore.setActive(liveRecordingMeetingId);
+        meetingsStore.setActiveTranscript(transcript);
+      } else if (!isRecording) {
+        // If not recording, clear active meeting to show the start recording button
+        meetingsStore.clearActive();
+        transcript = [];
+      }
+    }
   }
 
   function scrollTranscriptToBottom() {
@@ -713,6 +785,30 @@
     }
   }
 
+  function handleSegmentUpdate(updatedSegment: TranscriptSegment) {
+    // Update local transcript array
+    transcript = transcript.map(seg =>
+      seg.id === updatedSegment.id ? updatedSegment : seg
+    );
+    // Also update the store
+    meetingsStore.setActiveTranscript(transcript);
+  }
+
+  function handleSegmentDelete(segmentId: string) {
+    // Remove from local transcript array
+    transcript = transcript.filter(seg => seg.id !== segmentId);
+    // Also update the store
+    meetingsStore.setActiveTranscript(transcript);
+  }
+
+  async function loadSpeakers() {
+    try {
+      speakers = await invoke<Speaker[]>("list_speakers");
+    } catch (e) {
+      console.error("Failed to load speakers:", e);
+    }
+  }
+
   function handleSearch(query: string) {
     meetingsStore.searchMeetings(query);
   }
@@ -775,34 +871,58 @@
         {isPaused}
         onToggleRecording={toggleRecording}
         onTogglePause={togglePause}
+        showLiveIndicator={showRecordingIndicator}
+        onReturnToLive={returnToLiveRecording}
       />
 
       <!-- Content Area -->
       <div class="flex-1 flex flex-col overflow-hidden">
         {#if currentView === 'home'}
-          <div class="flex-1 flex flex-col p-6 overflow-hidden">
-            <!-- Recording Control (only show big button when NOT recording) -->
-            {#if !isRecording}
-              <div class="flex flex-col items-center justify-center py-6">
+          <!-- HOME VIEW: Clean CTA + Metrics (when NOT recording and NOT viewing past meeting) -->
+          {#if !isRecording && !isViewingPastMeeting}
+            <div class="flex-1 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+              <!-- Animated Background Orbs -->
+              <div class="absolute inset-0 overflow-hidden pointer-events-none">
+                <div class="absolute w-64 h-64 rounded-full bg-gradient-to-br from-phantom-ear-accent/10 to-phantom-ear-purple/5 blur-3xl animate-float animate-float-delay-1" style="top: 10%; left: 20%;"></div>
+                <div class="absolute w-48 h-48 rounded-full bg-gradient-to-br from-phantom-ear-purple/10 to-phantom-ear-accent/5 blur-3xl animate-float-slow animate-float-delay-2" style="top: 60%; right: 15%;"></div>
+                <div class="absolute w-32 h-32 rounded-full bg-gradient-to-br from-phantom-ear-accent/8 to-transparent blur-2xl animate-float-fast animate-float-delay-3" style="bottom: 20%; left: 10%;"></div>
+              </div>
+
+              <!-- Large centered recording button -->
+              <div class="flex flex-col items-center relative z-10">
                 <div class="relative">
+                  <!-- Outer glow ring -->
+                  <div class="absolute inset-0 w-24 h-24 rounded-full bg-gradient-accent opacity-20 blur-xl animate-glow-pulse"></div>
+                  <!-- Ripple rings -->
+                  <div class="absolute inset-0 w-24 h-24 rounded-full border-2 border-phantom-ear-accent/30 animate-ring-pulse"></div>
                   <button
                     onclick={toggleRecording}
-                    class="relative w-20 h-20 rounded-full transition-all duration-300 btn-shine bg-gradient-accent animate-idle-glow hover:scale-105"
+                    class="relative w-24 h-24 rounded-full transition-all duration-300 btn-shine btn-ripple bg-gradient-accent animate-glow-pulse hover:scale-105 active:scale-95"
+                    title="Start recording"
                   >
-                    <svg class="w-7 h-7 mx-auto text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-8 h-8 mx-auto text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24">
                       <circle cx="12" cy="12" r="6" />
                     </svg>
                   </button>
                 </div>
 
-                <p class="mt-3 text-sm text-phantom-ear-text-muted">
-                  Click to start recording
+                <p class="mt-5 text-lg font-medium text-phantom-ear-text animate-scale-in">
+                  Start Recording
+                </p>
+                <p class="mt-1.5 text-xs text-phantom-ear-text-muted animate-scale-in" style="animation-delay: 0.1s;">
+                  Press {isMacOS() ? '⌘' : 'Ctrl'} + Shift + R to start
                 </p>
               </div>
-            {/if}
 
-            <!-- Timeline (show when recording) -->
-            {#if isRecording}
+              <!-- Home Metrics Section -->
+              <div class="mt-10 relative z-10 w-full flex justify-center">
+                <HomeMetrics />
+              </div>
+            </div>
+          {:else if isRecording}
+            <!-- LIVE RECORDING VIEW -->
+            <div class="flex-1 flex flex-col p-6 overflow-hidden">
+              <!-- Timeline -->
               <div class="mb-4">
                 <TranscriptTimeline
                   segments={transcript}
@@ -810,7 +930,6 @@
                   currentPosition={recordingDuration}
                   isRecording={isRecording}
                   onSeek={(timestampMs) => {
-                    // For now, just scroll to the segment closest to this timestamp
                     const targetSec = timestampMs / 1000;
                     const closestSegment = transcript.reduce((prev, curr) => {
                       const prevDiff = Math.abs((prev.timestamp_ms || 0) / 1000 - targetSec);
@@ -828,69 +947,19 @@
                   }}
                 />
               </div>
-            {/if}
 
-            <!-- Transcript + AI Results Area -->
-            <div class="flex-1 flex flex-col min-h-0">
-              <!-- Collapsible Header -->
-              <div class="flex items-center justify-between mb-3">
-                <button
-                  onclick={() => transcriptCollapsed = !transcriptCollapsed}
-                  class="flex items-center gap-2 group"
-                >
-                  <svg
-                    class="w-4 h-4 text-phantom-ear-text-muted transition-transform {transcriptCollapsed ? '-rotate-90' : ''}"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                  </svg>
+              <!-- Live Transcript -->
+              <div class="flex-1 flex flex-col min-h-0">
+                <div class="flex items-center justify-between mb-3">
                   <h2 class="text-sm font-medium text-phantom-ear-text-muted uppercase tracking-wide">Live Transcript</h2>
-                </button>
-                <div class="flex items-center gap-2">
-                  {#if transcript.length > 0}
-                    <span class="text-xs text-phantom-ear-text-muted">{transcript.length} segments</span>
-                  {/if}
-                  {#if transcript.length > 0 && !isRecording}
-                    <button
-                      onclick={handleExportMeeting}
-                      class="px-2 py-1 text-xs rounded-md bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-accent transition-colors"
-                      title="Export transcript to clipboard"
-                    >
-                      {exportCopied ? 'Copied!' : 'Export'}
-                    </button>
-                  {/if}
+                  <span class="text-xs text-phantom-ear-text-muted">{transcript.length} segments</span>
                 </div>
-              </div>
 
-              {#if !transcriptCollapsed}
-                <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden shadow-glow-surface transition-all duration-200">
-                  {#if transcript.length === 0 && !summary && !answer}
-                    <div class="relative flex flex-col items-center justify-center h-full text-phantom-ear-text-muted overflow-hidden">
-                      <!-- Ambient PhantomEar background -->
-                      <img
-                        src="/PhantomEarNoBackground.png"
-                        alt=""
-                        aria-hidden="true"
-                        class="absolute inset-0 m-auto w-64 h-64 object-contain opacity-[0.04] blur-[1px] pointer-events-none select-none"
-                      />
-                      {#if isRecording}
-                        <p class="text-sm font-medium relative z-10">Listening...</p>
-                        <p class="text-xs mt-1 opacity-70 relative z-10">Speech will appear here in real-time</p>
-                      {:else}
-                        <!-- Scramble headline -->
-                        <p class="text-xl font-light tracking-wide relative z-10" aria-label="Always Listening. Never Seen.">
-                          {#if scrambleComplete}
-                            <span class="text-phantom-ear-text">{HEADLINE}</span>
-                          {:else}
-                            {#each scrambleOutput as ch}
-                              <span class={ch.scrambled ? 'text-phantom-ear-purple opacity-40' : 'text-phantom-ear-text'}>{ch.char}</span>
-                            {/each}
-                          {/if}
-                        </p>
-                        <p class="text-xs mt-3 opacity-50 relative z-10">Click record to begin</p>
-                      {/if}
+                <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden shadow-glow-surface">
+                  {#if transcript.length === 0}
+                    <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
+                      <p class="text-sm font-medium">Listening...</p>
+                      <p class="text-xs mt-1 opacity-70">Speech will appear here in real-time</p>
                     </div>
                   {:else}
                     <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
@@ -900,8 +969,94 @@
                           <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
                         </div>
                       {/each}
+                    </div>
+                  {/if}
+                </div>
 
-                      <!-- Summary Display (inside scroll) -->
+                <!-- Q&A Section (available during live recording) -->
+                {#if transcript.length > 0}
+                  <div class="mt-4 p-4 glass rounded-xl border border-phantom-ear-border">
+                    <div class="flex items-center gap-2 mb-3">
+                      <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Ask About This Recording</h3>
+                    </div>
+                    <form onsubmit={(e) => { e.preventDefault(); askQuestion(); }} class="flex gap-2">
+                      <input
+                        type="text"
+                        bind:value={question}
+                        placeholder="Ask a question about the transcript so far..."
+                        class="flex-1 px-3 py-2 text-sm bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
+                        disabled={isAsking}
+                      />
+                      <button
+                        type="submit"
+                        disabled={!question.trim() || isAsking}
+                        class="px-4 py-2 bg-gradient-accent rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-all hover-lift"
+                      >
+                        {#if isAsking}
+                          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                          </svg>
+                        {:else}
+                          Ask
+                        {/if}
+                      </button>
+                    </form>
+                    {#if answer}
+                      <div class="mt-3 p-3 bg-phantom-ear-surface/50 rounded-lg">
+                        <p class="text-sm text-phantom-ear-text leading-relaxed">{answer}</p>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {:else if isViewingPastMeeting}
+            <!-- PAST MEETING VIEW (Read-only) -->
+            <div class="flex-1 flex flex-col p-6 overflow-hidden">
+              <!-- Past Meeting Header -->
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 text-xs rounded bg-phantom-ear-surface text-phantom-ear-text-muted">Past Meeting</span>
+                  <h2 class="text-sm font-medium text-phantom-ear-text">
+                    {meetingsStore.activeMeeting?.title || 'Untitled Meeting'}
+                  </h2>
+                </div>
+                <div class="flex items-center gap-2">
+                  {#if transcript.length > 0}
+                    <button
+                      onclick={handleExportMeeting}
+                      class="px-2 py-1 text-xs rounded-md bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-accent transition-colors"
+                    >
+                      {exportCopied ? 'Copied!' : 'Export'}
+                    </button>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Transcript -->
+              <div class="flex-1 flex flex-col min-h-0">
+                <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden">
+                  {#if transcript.length === 0}
+                    <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
+                      <p class="text-sm">No transcript available</p>
+                    </div>
+                  {:else}
+                    <div bind:this={transcriptContainer} class="p-4 space-y-1 overflow-y-auto h-full scroll-smooth">
+                      {#each transcript as segment (segment.id)}
+                        <EditableSegment
+                          {segment}
+                          {speakers}
+                          onUpdate={handleSegmentUpdate}
+                          onDelete={handleSegmentDelete}
+                          onSpeakersChange={loadSpeakers}
+                        />
+                      {/each}
+
+                      <!-- Summary Display -->
                       {#if summary}
                         <div class="mt-4 p-4 rounded-xl bg-phantom-ear-purple/5 border border-phantom-ear-purple/20">
                           <div class="flex items-center gap-2 mb-3">
@@ -912,11 +1067,9 @@
                             </div>
                             <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Meeting Summary</h3>
                           </div>
-
                           {#if summary.overview}
                             <p class="text-sm text-phantom-ear-text leading-relaxed mb-4">{summary.overview}</p>
                           {/if}
-
                           {#if summary.key_points.length > 0}
                             <div class="mb-3">
                               <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Key Points</h4>
@@ -930,7 +1083,6 @@
                               </ul>
                             </div>
                           {/if}
-
                           {#if summary.action_items.length > 0}
                             <div>
                               <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Action Items</h4>
@@ -946,93 +1098,52 @@
                           {/if}
                         </div>
                       {/if}
-
-                      <!-- Answer Display (inside scroll) -->
-                      {#if answer}
-                        <div class="mt-4 p-4 rounded-xl bg-phantom-ear-accent/5 border border-phantom-ear-accent/20">
-                          <div class="flex items-center gap-2 mb-2">
-                            <div class="w-5 h-5 rounded-full bg-gradient-accent flex items-center justify-center">
-                              <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                              </svg>
-                            </div>
-                            <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">AI Answer</h3>
-                          </div>
-                          <p class="text-sm text-phantom-ear-text whitespace-pre-wrap leading-relaxed">{answer}</p>
-                        </div>
-                      {/if}
                     </div>
                   {/if}
                 </div>
-              {:else}
-                <div class="py-2 text-sm text-phantom-ear-text-muted">
-                  {transcript.length > 0 ? `${transcript.length} segments captured` : 'No transcript yet'}
-                </div>
-              {/if}
-            </div>
 
-            <!-- ChatGPT-style Input Bar -->
-            <div class="mt-4">
-              <form
-                onsubmit={(e) => {
-                  e.preventDefault();
-                  askQuestion();
-                }}
-                class="relative flex items-center"
-              >
-                <input
-                  type="text"
-                  bind:value={question}
-                  placeholder="Ask a question about the meeting..."
-                  disabled={transcript.length === 0}
-                  class="w-full pl-4 pr-28 py-3.5 glass border border-phantom-ear-border rounded-2xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-                <!-- Icons inside the input, right side -->
-                <div class="absolute right-2 flex items-center gap-1">
-                  <!-- Summary button -->
-                  <button
-                    type="button"
-                    onclick={generateSummary}
-                    disabled={isGeneratingSummary || transcript.length === 0}
-                    class="p-2 rounded-lg text-phantom-ear-text-muted hover:text-phantom-ear-purple hover:bg-phantom-ear-surface transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-phantom-ear-text-muted disabled:hover:bg-transparent"
-                    title="Generate summary"
-                  >
-                    {#if isGeneratingSummary}
-                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                <!-- Q&A Section -->
+                {#if transcript.length > 0}
+                  <div class="mt-4 p-4 glass rounded-xl border border-phantom-ear-border">
+                    <div class="flex items-center gap-2 mb-3">
+                      <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                    {:else}
-                      <!-- Document/summary icon -->
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
+                      <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Ask About This Meeting</h3>
+                    </div>
+                    <form onsubmit={(e) => { e.preventDefault(); askQuestion(); }} class="flex gap-2">
+                      <input
+                        type="text"
+                        bind:value={question}
+                        placeholder="Ask a question about this meeting..."
+                        class="flex-1 px-3 py-2 text-sm bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
+                        disabled={isAsking}
+                      />
+                      <button
+                        type="submit"
+                        disabled={!question.trim() || isAsking}
+                        class="px-4 py-2 bg-gradient-accent rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-all hover-lift"
+                      >
+                        {#if isAsking}
+                          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                          </svg>
+                        {:else}
+                          Ask
+                        {/if}
+                      </button>
+                    </form>
+                    {#if answer}
+                      <div class="mt-3 p-3 bg-phantom-ear-surface/50 rounded-lg">
+                        <p class="text-sm text-phantom-ear-text leading-relaxed">{answer}</p>
+                      </div>
                     {/if}
-                  </button>
-
-                  <!-- Send button -->
-                  <button
-                    type="submit"
-                    disabled={!question.trim() || isAsking || transcript.length === 0}
-                    class="p-2 rounded-xl bg-phantom-ear-text text-phantom-ear-bg hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
-                    title="Send question"
-                  >
-                    {#if isAsking}
-                      <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                      </svg>
-                    {:else}
-                      <!-- Arrow up icon -->
-                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                      </svg>
-                    {/if}
-                  </button>
-                </div>
-              </form>
+                  </div>
+                {/if}
+              </div>
             </div>
-          </div>
+          {/if}
 
         {:else if currentView === 'phomy'}
           <div class="flex-1 flex flex-col p-6 overflow-hidden">
@@ -1169,7 +1280,7 @@
           </div>
 
         {:else if currentView === 'settings'}
-          <div class="flex-1 overflow-y-auto">
+          <div class="flex-1 min-h-0 overflow-hidden">
             <Settings onClose={handleSettingsSaved} inline={true} />
           </div>
         {/if}

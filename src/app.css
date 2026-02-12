@@ -372,3 +372,204 @@ body {
 .animate-cursor-blink {
   animation: cursor-blink 0.6s step-end infinite;
 }
+
+/* ============================================================================
+   HOME PAGE ANIMATIONS - Visual & Animated Style
+   ============================================================================ */
+
+/* Floating animation for background orbs */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0) translateX(0) scale(1);
+  }
+  25% {
+    transform: translateY(-20px) translateX(10px) scale(1.02);
+  }
+  50% {
+    transform: translateY(-10px) translateX(-10px) scale(0.98);
+  }
+  75% {
+    transform: translateY(-25px) translateX(5px) scale(1.01);
+  }
+}
+
+.animate-float {
+  animation: float 8s ease-in-out infinite;
+}
+
+.animate-float-slow {
+  animation: float 12s ease-in-out infinite;
+}
+
+.animate-float-fast {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Delayed float animations for staggered effect */
+.animate-float-delay-1 {
+  animation-delay: -2s;
+}
+
+.animate-float-delay-2 {
+  animation-delay: -4s;
+}
+
+.animate-float-delay-3 {
+  animation-delay: -6s;
+}
+
+/* Glow pulse for recording button (enhanced) */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 20px rgba(59, 130, 246, 0.4),
+      0 0 40px rgba(139, 92, 246, 0.2),
+      0 0 60px rgba(59, 130, 246, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 30px rgba(59, 130, 246, 0.6),
+      0 0 60px rgba(139, 92, 246, 0.3),
+      0 0 80px rgba(59, 130, 246, 0.2);
+  }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Staggered fade in for cards */
+@keyframes stagger-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-stagger-in {
+  animation: stagger-fade-in 0.5s ease-out forwards;
+  opacity: 0;
+}
+
+.animate-stagger-in:nth-child(1) { animation-delay: 0.1s; }
+.animate-stagger-in:nth-child(2) { animation-delay: 0.2s; }
+.animate-stagger-in:nth-child(3) { animation-delay: 0.3s; }
+.animate-stagger-in:nth-child(4) { animation-delay: 0.4s; }
+.animate-stagger-in:nth-child(5) { animation-delay: 0.5s; }
+.animate-stagger-in:nth-child(6) { animation-delay: 0.6s; }
+.animate-stagger-in:nth-child(7) { animation-delay: 0.7s; }
+
+/* Scale in animation */
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.4s ease-out forwards;
+}
+
+/* Gradient border glow */
+.gradient-border {
+  position: relative;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(139, 92, 246, 0.5));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.gradient-border:hover::before {
+  opacity: 1;
+}
+
+/* Glass card enhanced */
+.glass-card {
+  background: rgba(47, 47, 47, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  background: rgba(47, 47, 47, 0.8);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="light"] .glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
+:root[data-theme="light"] .glass-card:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Metric number animation */
+@keyframes count-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-count {
+  animation: count-up 0.6s ease-out forwards;
+}
+
+/* Ripple effect for button */
+@keyframes ripple {
+  0% {
+    transform: scale(0);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+.btn-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
+  transform: scale(0);
+  opacity: 0;
+}
+
+.btn-ripple:active::after {
+  animation: ripple 0.6s ease-out;
+}

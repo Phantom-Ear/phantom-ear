@@ -12,6 +12,7 @@
     whisper_model: string;
     language: string;
     asr_backend: string;
+    audio_device: string | null;
   }
 
   interface ModelInfo {
@@ -28,6 +29,11 @@
     supported_languages: string[];
   }
 
+  interface AudioDeviceInfo {
+    name: string;
+    is_default: boolean;
+  }
+
   let { onClose, inline = false }: { onClose: () => void; inline?: boolean } = $props();
 
   let settings = $state<Settings>({
@@ -39,9 +45,11 @@
     whisper_model: "base",
     language: "en",
     asr_backend: "whisper",
+    audio_device: null,
   });
 
   let asrBackends = $state<BackendInfo[]>([]);
+  let audioDevices = $state<AudioDeviceInfo[]>([]);
 
   let models = $state<ModelInfo[]>([]);
   let isLoading = $state(true);
@@ -70,14 +78,16 @@
 
   async function loadSettings() {
     try {
-      const [loadedSettings, loadedModels, loadedBackends] = await Promise.all([
+      const [loadedSettings, loadedModels, loadedBackends, loadedDevices] = await Promise.all([
         invoke<Settings>("get_settings"),
         invoke<ModelInfo[]>("get_models_info"),
         invoke<BackendInfo[]>("get_asr_backends"),
+        invoke<AudioDeviceInfo[]>("list_audio_devices"),
       ]);
       settings = loadedSettings;
       models = loadedModels;
       asrBackends = loadedBackends;
+      audioDevices = loadedDevices;
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
@@ -141,7 +151,7 @@
 {/if}
 
 <!-- Modal / Inline Container -->
-<div class="{inline ? 'flex flex-col h-full' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
+<div class="{inline ? 'flex flex-col h-full min-h-0' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
   <!-- Header -->
   <div class="flex items-center justify-between px-6 py-4 border-b border-phantom-ear-border/50">
     <div class="flex items-center gap-3">
@@ -204,7 +214,7 @@
     </div>
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-6 space-y-6">
+    <div class="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
       {#if activeTab === "general"}
         <!-- Language -->
         <div>
@@ -221,6 +231,27 @@
           </select>
           <p class="mt-1 text-xs text-phantom-ear-text-muted">
             Choose "Auto-detect" if speakers use multiple languages
+          </p>
+        </div>
+
+        <!-- Audio Input Device -->
+        <div>
+          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
+            Audio Input Device
+          </label>
+          <select
+            bind:value={settings.audio_device}
+            class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text focus:outline-none focus:border-phantom-ear-accent transition-colors"
+          >
+            <option value={null}>Default Device</option>
+            {#each audioDevices as device}
+              <option value={device.name}>
+                {device.name} {device.is_default ? '(System Default)' : ''}
+              </option>
+            {/each}
+          </select>
+          <p class="mt-1 text-xs text-phantom-ear-text-muted">
+            Select the microphone to use for recording
           </p>
         </div>
 

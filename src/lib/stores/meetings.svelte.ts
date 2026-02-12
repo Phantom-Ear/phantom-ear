@@ -34,6 +34,11 @@ function createMeetingsStore() {
     }
   }
 
+  function clearActive() {
+    activeMeetingId = null;
+    activeTranscript = [];
+  }
+
   function setActiveTranscript(segments: TranscriptSegment[]) {
     activeTranscript = segments;
   }
@@ -118,15 +123,21 @@ function createMeetingsStore() {
     return meetings.filter(m => !m.pinned);
   }
 
+  function getActiveMeeting(): MeetingListItem | null {
+    return meetings.find(m => m.id === activeMeetingId) || null;
+  }
+
   return {
     get meetings() { return meetings; },
     get activeMeetingId() { return activeMeetingId; },
     get activeTranscript() { return activeTranscript; },
     get searchResults() { return searchResults; },
     get searchQuery() { return searchQuery; },
+    get activeMeeting() { return getActiveMeeting(); },
     loadMeetings,
     selectMeeting,
     setActive,
+    clearActive,
     setActiveTranscript,
     addLocalSegment,
     renameMeeting,

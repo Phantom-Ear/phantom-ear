@@ -9,7 +9,7 @@ use crate::audio::AudioCapture;
 use crate::embeddings::{self, EmbeddingModel};
 use crate::llm::{LlmClient, LlmProvider};
 use crate::models::{self, ModelInfo};
-use crate::storage::{Database, MeetingListItem, SearchResult, SemanticSearchResult, SegmentRow};
+use crate::storage::{Database, MeetingListItem, SearchResult, SemanticSearchResult, SegmentRow, Speaker};
 use crate::transcription::TranscriptionConfig;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,8 @@ pub struct Settings {
     pub language: String,
     #[serde(default = "default_asr_backend")]
     pub asr_backend: String,
+    #[serde(default)]
+    pub audio_device: Option<String>,
 }
 
 fn default_asr_backend() -> String {
@@ -57,6 +59,7 @@ impl Default for Settings {
             whisper_model: "small".to_string(),
             language: "en".to_string(),
             asr_backend: "whisper".to_string(),
+            audio_device: None,
         }
     }
 }
@@ -153,9 +156,18 @@ pub async fn start_recording(
         }
     }
 
-    // Initialize audio capture
+    // Initialize audio capture with selected device from settings
     let mut audio_capture = AudioCapture::new()
         .map_err(|e| format!("Failed to initialize audio: {}", e))?;
+
+    // Apply selected audio device if configured
+    {
+        let settings = state.settings.lock().await;
+        if let Some(ref device_name) = settings.audio_device {
+            audio_capture.select_device(Some(device_name.as_str()))
+                .map_err(|e| format!("Failed to select audio device '{}': {}", device_name, e))?;
+        }
+    }
 
     audio_capture.start()
         .map_err(|e| format!("Failed to start recording: {}", e))?;
@@ -342,6 +354,7 @@ async fn run_transcription_loop_with_storage(
                                     time_label,
                                     text: text.to_string(),
                                     timestamp_ms: total_duration_ms,
+                                    speaker_id: None,
                                 }) {
                                     log::error!("Failed to persist segment: {}", e);
                                 }
@@ -654,6 +667,91 @@ pub async fn export_meeting(
             Ok(txt)
         }
     }
+}
+
+// ============================================================================
+// Segment Editing Commands
+// ============================================================================
+
+/// Update a segment's text and/or speaker
+#[tauri::command]
+pub async fn update_segment(
+    segment_id: String,
+    text: Option<String>,
+    speaker_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if let Some(ref new_text) = text {
+        state.db.update_segment_text(&segment_id, new_text)
+            .map_err(|e| format!("Failed to update segment text: {}", e))?;
+    }
+    if speaker_id.is_some() || text.is_some() {
+        // Only update speaker if explicitly passed (even if None to clear it)
+        if let Some(ref speaker) = speaker_id {
+            state.db.update_segment_speaker(&segment_id, Some(speaker.as_str()))
+                .map_err(|e| format!("Failed to update segment speaker: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Delete a segment
+#[tauri::command]
+pub async fn delete_segment(
+    segment_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.delete_segment(&segment_id)
+        .map_err(|e| format!("Failed to delete segment: {}", e))
+}
+
+// ============================================================================
+// Speaker Commands
+// ============================================================================
+
+/// List all speakers
+#[tauri::command]
+pub async fn list_speakers(
+    state: State<'_, AppState>,
+) -> Result<Vec<Speaker>, String> {
+    state.db.list_speakers()
+        .map_err(|e| format!("Failed to list speakers: {}", e))
+}
+
+/// Create a new speaker
+#[tauri::command]
+pub async fn create_speaker(
+    name: String,
+    color: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let id = format!("speaker-{}", Utc::now().timestamp_millis());
+    let created_at = Utc::now().to_rfc3339();
+    state.db.create_speaker(&id, &name, &color, &created_at)
+        .map_err(|e| format!("Failed to create speaker: {}", e))?;
+    Ok(id)
+}
+
+/// Update a speaker
+#[tauri::command]
+pub async fn update_speaker(
+    id: String,
+    name: String,
+    color: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.update_speaker(&id, &name, &color)
+        .map_err(|e| format!("Failed to update speaker: {}", e))
+}
+
+/// Delete a speaker
+#[tauri::command]
+pub async fn delete_speaker(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.delete_speaker(&id)
+        .map_err(|e| format!("Failed to delete speaker: {}", e))
 }
 
 // ============================================================================
