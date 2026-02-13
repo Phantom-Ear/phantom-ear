@@ -67,12 +67,16 @@ directories = "6"
 num_cpus = "1.16"
 sysinfo = "0.32"
 
+# Window detection for meeting detection (lists all windows)
+x-win = "5"
+
 # Async trait support
 async-trait = "0.1"
 
 # Progress tracking
 indicatif = "0.17"
 tauri-plugin-dialog = "2.6.0"
+tauri-plugin-notification = "2"
 zip = "2"
 
 [features]

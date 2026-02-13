@@ -13,7 +13,9 @@ pub mod storage;
 pub mod transcription;
 
 use commands::{AppState, Settings};
+use detection::MeetingDetector;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use storage::Database;
 use tauri::{
     Emitter, Manager, RunEvent, WindowEvent,
@@ -30,6 +32,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             commands::start_recording,
             commands::stop_recording,
@@ -78,6 +81,14 @@ pub fn run() {
             commands::get_embedding_model_download_urls,
             commands::import_embedding_model,
             commands::get_audio_level,
+            // Meeting detection commands
+            commands::start_meeting_detection,
+            commands::stop_meeting_detection,
+            commands::is_meeting_detection_running,
+            commands::dismiss_meeting_notification,
+            commands::check_meeting_running,
+            commands::check_screen_recording_permission,
+            commands::open_screen_recording_settings,
         ])
         .setup(|app| {
             // Get app data directory and create DB synchronously
@@ -112,6 +123,9 @@ pub fn run() {
                 }
             };
 
+            // Check if auto-detect meetings is enabled
+            let auto_detect_enabled = settings.auto_detect_meetings;
+
             let state = AppState {
                 audio_capture: Arc::new(Mutex::new(None)),
                 transcription_engine: Arc::new(Mutex::new(None)),
@@ -122,7 +136,14 @@ pub fn run() {
                 db,
                 active_meeting_id: Arc::new(Mutex::new(None)),
                 embedding_model: Arc::new(Mutex::new(None)),
+                meeting_detector: Arc::new(Mutex::new(MeetingDetector::new())),
+                detection_running: Arc::new(AtomicBool::new(false)),
             };
+
+            // Auto-start meeting detection if enabled in settings
+            if auto_detect_enabled {
+                log::info!("Auto-detect meetings enabled, will start detection when frontend is ready");
+            }
 
             app.manage(state);
 
