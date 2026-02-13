@@ -11,6 +11,7 @@
   import TranscriptTimeline from "$lib/components/TranscriptTimeline.svelte";
   import HomeMetrics from "$lib/components/HomeMetrics.svelte";
   import EditableSegment from "$lib/components/EditableSegment.svelte";
+  import Onboarding from "$lib/components/Onboarding.svelte";
   import MeetingNotification from "$lib/components/MeetingNotification.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
   import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
@@ -95,6 +96,9 @@
   // Search overlay state
   let showSearchOverlay = $state(false);
 
+  // Onboarding state
+  let showOnboarding = $state(false);
+
   // Keyboard shortcut state
   let sidebarFocused = $state(false);
 
@@ -176,6 +180,11 @@
         llmProvider = settings.llm_provider;
         llmModelName = settings.ollama_model || "";
         autoDetectMeetings = settings.auto_detect_meetings;
+
+        // Check if onboarding should be shown
+        if (!settings.onboarding_completed) {
+          showOnboarding = true;
+        }
       } catch (e) {
         console.error("Failed to load settings:", e);
       }
@@ -851,6 +860,8 @@
 
 {#if !showSplash && needsSetup}
   <Setup onComplete={handleSetupComplete} />
+{:else if !showSplash && showOnboarding}
+  <Onboarding onComplete={() => showOnboarding = false} />
 {:else if !showSplash}
   <div class="flex h-screen bg-phantom-ear-bg no-select">
     <!-- Sidebar -->
@@ -860,6 +871,7 @@
       {pinnedMeetings}
       {recentMeetings}
       activeMeetingId={meetingsStore.activeMeetingId}
+      {isRecording}
       onToggle={() => sidebarCollapsed = !sidebarCollapsed}
       onNavigate={handleNavigate}
       onSelectMeeting={handleSelectMeeting}
@@ -868,6 +880,7 @@
       onDeleteMeeting={(id) => meetingsStore.deleteMeeting(id)}
       onSearch={handleSearch}
       onOpenSearchOverlay={() => showSearchOverlay = true}
+      onToggleRecording={toggleRecording}
     />
 
     <!-- Main Content -->
@@ -1298,7 +1311,7 @@
 
         {:else if currentView === 'settings'}
           <div class="flex-1 min-h-0 overflow-hidden">
-            <Settings onClose={handleSettingsSaved} inline={true} />
+            <Settings onClose={handleSettingsSaved} inline={true} onShowOnboarding={() => showOnboarding = true} />
           </div>
         {/if}
       </div>

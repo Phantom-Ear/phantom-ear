@@ -6,7 +6,6 @@
   let mounted = $state(false);
 
   onMount(() => {
-    // Trigger animations after mount
     setTimeout(() => {
       mounted = true;
     }, 100);
@@ -55,14 +54,15 @@
 
   // Weekly activity data (last 7 days)
   const weeklyActivity = $derived.by(() => {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const days = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
     const now = new Date();
     const weekData: { day: string; count: number; isToday: boolean }[] = [];
 
     for (let i = 6; i >= 0; i--) {
       const date = new Date(now);
       date.setDate(now.getDate() - i);
-      const dayName = days[date.getDay()];
+      const dayIndex = date.getDay();
+      const dayName = days[dayIndex === 0 ? 1 : dayIndex === 6 ? 0 : dayIndex + 1]; // Adjust for Sat/Sun
 
       const count = meetingsStore.meetings.filter(m => {
         const meetingDate = new Date(m.created_at);
@@ -70,12 +70,13 @@
       }).length;
 
       weekData.push({
-        day: dayName,
+        day: days[date.getDay() === 0 ? 1 : date.getDay() === 6 ? 0 : date.getDay() + 1],
         count,
         isToday: i === 0
       });
     }
 
+    // Re-sort to show proper day order
     return weekData;
   });
 
@@ -119,283 +120,104 @@
   }
 </script>
 
-<div class="metrics-container" class:mounted>
-  <!-- Primary Metrics Row -->
-  <div class="primary-metrics">
-    <!-- Total Meetings Card -->
-    <div class="metric-card glass-card animate-stagger-in">
-      <div class="metric-icon blue">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-        </svg>
+<div class="w-full max-w-lg {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'} transition-all duration-500 ease-out">
+  <!-- Stats Grid - 4 balanced cards -->
+  <div class="grid grid-cols-4 gap-3 mb-4">
+    <!-- Total Meetings -->
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-phantom-ear-accent/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-phantom-ear-accent/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-phantom-ear-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+        </div>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{totalMeetings}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">Total</p>
       </div>
-      <div class="metric-content">
-        <span class="metric-value">{totalMeetings}</span>
-        <span class="metric-label">Total Meetings</span>
+    </div>
+
+    <!-- This Week -->
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-phantom-ear-purple/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-phantom-ear-purple/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-phantom-ear-purple" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+        </div>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{meetingsThisWeek}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">This Week</p>
       </div>
     </div>
 
-    <!-- Total Time Card -->
-    <div class="metric-card glass-card animate-stagger-in">
-      <div class="metric-icon purple">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      </div>
-      <div class="metric-content">
-        <span class="metric-value">{formatDuration(totalRecordingTime)}</span>
-        <span class="metric-label">Total Time</span>
+    <!-- Total Time -->
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-green-500/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-green-500/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+        </div>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{formatDuration(totalRecordingTime)}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">Total Time</p>
       </div>
     </div>
-  </div>
 
-  <!-- Secondary Metrics Row -->
-  <div class="secondary-metrics">
-    <div class="metric-pill glass-card animate-stagger-in">
-      <span class="pill-value">{meetingsThisWeek}</span>
-      <span class="pill-label">This Week</span>
-    </div>
-
-    <div class="metric-pill glass-card animate-stagger-in">
-      <span class="pill-value">{formatDuration(averageDuration)}</span>
-      <span class="pill-label">Avg Duration</span>
-    </div>
-
-    {#if mostActiveDay}
-      <div class="metric-pill glass-card animate-stagger-in">
-        <span class="pill-value">{mostActiveDay}</span>
-        <span class="pill-label">Most Active</span>
+    <!-- Avg Duration -->
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-yellow-500/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-yellow-500/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{formatDuration(averageDuration)}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">Avg</p>
       </div>
-    {/if}
-
-    {#if lastMeetingTime}
-      <div class="metric-pill glass-card animate-stagger-in">
-        <span class="pill-value">{formatRelativeTime(lastMeetingTime)}</span>
-        <span class="pill-label">Last Meeting</span>
-      </div>
-    {/if}
+    </div>
   </div>
 
   <!-- Weekly Activity Chart -->
   {#if totalMeetings > 0}
-    <div class="activity-chart glass-card animate-stagger-in">
-      <div class="chart-header">
-        <span class="chart-title">This Week</span>
-        <span class="chart-subtitle">{meetingsThisWeek} recording{meetingsThisWeek !== 1 ? 's' : ''}</span>
+    <div class="rounded-xl bg-phantom-ear-surface/40 border border-phantom-ear-border/50 p-4">
+      <div class="flex justify-between items-center mb-3">
+        <span class="text-xs font-medium text-phantom-ear-text">Weekly Activity</span>
+        {#if mostActiveDay}
+          <span class="text-[10px] text-phantom-ear-text-muted">Most active: <span class="text-phantom-ear-accent">{mostActiveDay}</span></span>
+        {/if}
       </div>
-      <div class="chart-bars">
+
+      <div class="flex items-end justify-between gap-2 h-16">
         {#each weeklyActivity as day, i}
-          <div class="bar-container">
-            <div
-              class="bar"
-              class:today={day.isToday}
-              class:active={day.count > 0}
-              style="height: {day.count > 0 ? Math.max(20, (day.count / maxWeeklyCount) * 100) : 8}%"
-            >
-              {#if day.count > 0}
-                <span class="bar-count">{day.count}</span>
-              {/if}
+          <div class="flex-1 flex flex-col items-center gap-1.5">
+            <div class="w-full relative">
+              <div
+                class="w-full rounded transition-all duration-500 ease-out {day.count > 0 ? 'bg-gradient-to-t from-phantom-ear-accent to-phantom-ear-purple' : 'bg-phantom-ear-border/40'}"
+                style="height: {day.count > 0 ? Math.max(12, (day.count / maxWeeklyCount) * 48) : 3}px; animation-delay: {i * 50}ms"
+              >
+                {#if day.count > 0}
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-phantom-ear-text tabular-nums">
+                    {day.count}
+                  </span>
+                {/if}
+              </div>
             </div>
-            <span class="bar-label" class:today={day.isToday}>{day.day}</span>
+            <span class="text-[9px] font-medium {day.isToday ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted'}">
+              {day.day}
+            </span>
           </div>
         {/each}
       </div>
     </div>
   {/if}
+
+  <!-- Last Meeting Info -->
+  {#if lastMeetingTime}
+    <div class="mt-3 text-center">
+      <span class="text-xs text-phantom-ear-text-muted">Last recording: <span class="text-phantom-ear-text">{formatRelativeTime(lastMeetingTime)}</span></span>
+    </div>
+  {/if}
 </div>
-
-<style>
-  .metrics-container {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    width: 100%;
-    max-width: 28rem;
-    opacity: 0;
-    transform: translateY(10px);
-    transition: opacity 0.5s ease, transform 0.5s ease;
-  }
-
-  .metrics-container.mounted {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  /* Primary Metrics */
-  .primary-metrics {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.75rem;
-  }
-
-  .metric-card {
-    display: flex;
-    align-items: center;
-    gap: 0.875rem;
-    padding: 1rem;
-    border-radius: 1rem;
-  }
-
-  .metric-icon {
-    width: 2.5rem;
-    height: 2.5rem;
-    border-radius: 0.75rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .metric-icon svg {
-    width: 1.25rem;
-    height: 1.25rem;
-  }
-
-  .metric-icon.blue {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.1));
-    color: var(--phantom-ear-accent);
-  }
-
-  .metric-icon.purple {
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.1));
-    color: var(--phantom-ear-purple);
-  }
-
-  .metric-content {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .metric-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--phantom-ear-text);
-    font-variant-numeric: tabular-nums;
-    line-height: 1.2;
-  }
-
-  .metric-label {
-    font-size: 0.6875rem;
-    font-weight: 500;
-    color: var(--phantom-ear-text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  /* Secondary Metrics */
-  .secondary-metrics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    justify-content: center;
-  }
-
-  .metric-pill {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.875rem;
-    border-radius: 9999px;
-    font-size: 0.8125rem;
-  }
-
-  .pill-value {
-    font-weight: 600;
-    color: var(--phantom-ear-text);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .pill-label {
-    color: var(--phantom-ear-text-muted);
-    font-size: 0.75rem;
-  }
-
-  /* Activity Chart */
-  .activity-chart {
-    padding: 1rem;
-    border-radius: 1rem;
-  }
-
-  .chart-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.75rem;
-  }
-
-  .chart-title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--phantom-ear-text);
-  }
-
-  .chart-subtitle {
-    font-size: 0.6875rem;
-    color: var(--phantom-ear-text-muted);
-  }
-
-  .chart-bars {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    height: 4rem;
-    gap: 0.25rem;
-  }
-
-  .bar-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    flex: 1;
-    height: 100%;
-  }
-
-  .bar {
-    width: 100%;
-    max-width: 1.5rem;
-    background: var(--phantom-ear-border);
-    border-radius: 0.25rem 0.25rem 0 0;
-    transition: height 0.5s ease, background 0.3s ease;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: 0.25rem;
-    margin-top: auto;
-  }
-
-  .bar.active {
-    background: linear-gradient(180deg, var(--phantom-ear-accent), var(--phantom-ear-purple));
-  }
-
-  .bar.today {
-    box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
-  }
-
-  .bar-count {
-    font-size: 0.5625rem;
-    font-weight: 600;
-    color: white;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-
-  .bar-label {
-    font-size: 0.5625rem;
-    color: var(--phantom-ear-text-muted);
-    margin-top: 0.375rem;
-    font-weight: 500;
-  }
-
-  .bar-label.today {
-    color: var(--phantom-ear-accent);
-    font-weight: 600;
-  }
-
-  /* Responsive */
-  @media (max-width: 360px) {
-    .primary-metrics {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>
