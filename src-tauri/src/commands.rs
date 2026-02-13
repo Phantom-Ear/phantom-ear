@@ -38,12 +38,18 @@ pub struct Settings {
     pub ollama_url: Option<String>,
     pub ollama_model: Option<String>,
     pub auto_detect_meetings: bool,
+    #[serde(default = "default_true")]
+    pub show_system_notifications: bool,
     pub whisper_model: String,
     pub language: String,
     #[serde(default = "default_asr_backend")]
     pub asr_backend: String,
     #[serde(default)]
     pub audio_device: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_asr_backend() -> String {
@@ -58,6 +64,7 @@ impl Default for Settings {
             ollama_url: Some("http://localhost:11434".to_string()),
             ollama_model: Some("llama3.2".to_string()),
             auto_detect_meetings: false,
+            show_system_notifications: true,
             whisper_model: "small".to_string(),
             language: "en".to_string(),
             asr_backend: "whisper".to_string(),
@@ -1729,6 +1736,7 @@ pub async fn start_meeting_detection(
     let detector_arc = state.meeting_detector.clone();
     let detection_running = state.detection_running.clone();
     let is_recording = state.is_recording.clone();
+    let settings_arc = state.settings.clone();
 
     // Spawn background detection loop
     tauri::async_runtime::spawn(async move {
@@ -1755,9 +1763,15 @@ pub async fn start_meeting_detection(
             if let Some(detected) = detector.detect_meeting() {
                 log::info!("Meeting detected: {} ({})", detected.app_name, detected.process_name);
 
-                // Send native OS notification
+                // Check if system notifications are enabled
+                let show_system_notifications = {
+                    let settings = settings_arc.lock().await;
+                    settings.show_system_notifications
+                };
+
+                // Send native OS notification (if enabled)
                 #[cfg(desktop)]
-                {
+                if show_system_notifications {
                     use tauri_plugin_notification::NotificationExt;
                     if let Err(e) = app.notification()
                         .builder()
@@ -1769,7 +1783,7 @@ pub async fn start_meeting_detection(
                     }
                 }
 
-                // Also emit in-app notification event
+                // Also emit in-app notification event (always)
                 let event = MeetingDetectedEvent {
                     app_name: detected.app_name.clone(),
                     message: format!("{} detected! Would you like to start recording?", detected.app_name),
@@ -1831,14 +1845,15 @@ pub async fn is_meeting_detection_running(
 }
 
 /// Dismiss the current meeting detection notification
-/// (allows same app to be detected again later)
+/// Keeps the meeting in "dismissed" state until it actually ends,
+/// preventing repeated notifications for the same meeting
 #[tauri::command]
 pub async fn dismiss_meeting_notification(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut detector = state.meeting_detector.lock().await;
-    detector.clear_notifications();
-    log::info!("Meeting notification dismissed");
+    detector.dismiss_notification(); // Mark as dismissed, not cleared
+    log::info!("Meeting notification dismissed (will not re-notify until meeting ends)");
     Ok(())
 }
 

@@ -8,6 +8,7 @@
     ollama_url: string | null;
     ollama_model: string | null;
     auto_detect_meetings: boolean;
+    show_system_notifications: boolean;
     whisper_model: string;
     language: string;
     asr_backend: string;
@@ -41,6 +42,7 @@
     ollama_url: "http://localhost:11434",
     ollama_model: "llama3.2",
     auto_detect_meetings: false,
+    show_system_notifications: true,
     whisper_model: "base",
     language: "en",
     asr_backend: "whisper",
@@ -271,82 +273,108 @@
           </div>
         </div>
 
-        <!-- Auto-detect Toggle -->
-        <div class="flex items-center justify-between p-3 bg-phantom-ear-surface/50 rounded-xl border border-phantom-ear-border/50">
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
-              <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div>
-              <span class="block text-sm font-medium text-phantom-ear-text">Auto-detect Meetings</span>
-              <span class="block text-xs text-phantom-ear-text-muted">Notify when Zoom, Teams start</span>
-            </div>
-          </div>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" bind:checked={settings.auto_detect_meetings} class="sr-only peer" />
-            <div class="w-10 h-5 bg-phantom-ear-surface border border-phantom-ear-border rounded-full peer peer-checked:bg-green-500 peer-checked:border-green-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-phantom-ear-text-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:bg-white"></div>
-          </label>
-        </div>
+        <!-- Meeting Detection Section -->
+        <div class="space-y-3">
+          <label class="block text-xs font-medium text-phantom-ear-text-muted">Meeting Detection</label>
 
-        <!-- macOS Screen Recording Permission Notice -->
-        {#if settings.auto_detect_meetings && isMacOS}
-          <div class="p-3 rounded-xl border {hasScreenRecordingPermission === false ? 'bg-amber-500/10 border-amber-500/30' : hasScreenRecordingPermission === true ? 'bg-green-500/10 border-green-500/30' : 'bg-phantom-ear-surface/50 border-phantom-ear-border/50'}">
-            <div class="flex items-start gap-3">
-              {#if hasScreenRecordingPermission === null || isCheckingPermission}
-                <!-- Checking -->
-                <div class="w-8 h-8 rounded-lg bg-phantom-ear-surface flex items-center justify-center shrink-0">
-                  <svg class="w-4 h-4 text-phantom-ear-text-muted animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                  </svg>
-                </div>
-                <div class="flex-1">
-                  <span class="block text-sm font-medium text-phantom-ear-text">Checking permission...</span>
-                </div>
-              {:else if hasScreenRecordingPermission === false}
-                <!-- Permission not granted -->
-                <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
-                  <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <span class="block text-sm font-medium text-amber-400">Screen Recording Permission Required</span>
-                  <p class="text-xs text-phantom-ear-text-muted mt-1">
-                    PhantomEar needs Screen Recording permission to detect active meetings by reading window titles. Without it, detection won't work.
-                  </p>
-                  <div class="flex items-center gap-2 mt-2">
-                    <button
-                      onclick={openScreenRecordingSettings}
-                      class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 hover:bg-amber-600 text-white transition-colors"
-                    >
-                      Open Settings
-                    </button>
-                    <button
-                      onclick={checkPermission}
-                      class="px-3 py-1.5 rounded-lg text-xs font-medium border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text transition-colors"
-                    >
-                      Recheck
-                    </button>
-                  </div>
-                </div>
-              {:else}
-                <!-- Permission granted -->
-                <div class="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center shrink-0">
-                  <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <div class="flex-1">
-                  <span class="block text-sm font-medium text-green-400">Screen Recording Enabled</span>
-                  <span class="block text-xs text-phantom-ear-text-muted mt-0.5">Meeting detection is ready to work</span>
-                </div>
-              {/if}
+          <!-- Auto-detect Toggle -->
+          <div class="flex items-center justify-between p-3 bg-phantom-ear-surface/50 rounded-xl border border-phantom-ear-border/50">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div>
+                <span class="block text-sm font-medium text-phantom-ear-text">Auto-detect Meetings</span>
+                <span class="block text-xs text-phantom-ear-text-muted">Detects Zoom, Teams, Meet, etc.</span>
+              </div>
             </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" bind:checked={settings.auto_detect_meetings} class="sr-only peer" />
+              <div class="w-10 h-5 bg-phantom-ear-surface border border-phantom-ear-border rounded-full peer peer-checked:bg-green-500 peer-checked:border-green-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-phantom-ear-text-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:bg-white"></div>
+            </label>
           </div>
-        {/if}
+
+          <!-- System Notifications Toggle (only show when auto-detect is on) -->
+          {#if settings.auto_detect_meetings}
+            <div class="flex items-center justify-between p-3 bg-phantom-ear-surface/50 rounded-xl border border-phantom-ear-border/50">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                </div>
+                <div>
+                  <span class="block text-sm font-medium text-phantom-ear-text">System Notifications</span>
+                  <span class="block text-xs text-phantom-ear-text-muted">Show OS notifications when meeting detected</span>
+                </div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" bind:checked={settings.show_system_notifications} class="sr-only peer" />
+                <div class="w-10 h-5 bg-phantom-ear-surface border border-phantom-ear-border rounded-full peer peer-checked:bg-blue-500 peer-checked:border-blue-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-phantom-ear-text-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:bg-white"></div>
+              </label>
+            </div>
+
+            <!-- macOS Screen Recording Permission Notice -->
+            {#if isMacOS}
+              <div class="p-3 rounded-xl border {hasScreenRecordingPermission === false ? 'bg-amber-500/10 border-amber-500/30' : hasScreenRecordingPermission === true ? 'bg-green-500/10 border-green-500/30' : 'bg-phantom-ear-surface/50 border-phantom-ear-border/50'}">
+                <div class="flex items-start gap-3">
+                  {#if hasScreenRecordingPermission === null || isCheckingPermission}
+                    <!-- Checking -->
+                    <div class="w-8 h-8 rounded-lg bg-phantom-ear-surface flex items-center justify-center shrink-0">
+                      <svg class="w-4 h-4 text-phantom-ear-text-muted animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                      </svg>
+                    </div>
+                    <div class="flex-1">
+                      <span class="block text-sm font-medium text-phantom-ear-text">Checking permission...</span>
+                    </div>
+                  {:else if hasScreenRecordingPermission === false}
+                    <!-- Permission not granted -->
+                    <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
+                      <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <span class="block text-sm font-medium text-amber-400">Screen Recording Required</span>
+                      <p class="text-xs text-phantom-ear-text-muted mt-1">
+                        Required to detect meetings by reading window titles.
+                      </p>
+                      <div class="flex items-center gap-2 mt-2">
+                        <button
+                          onclick={openScreenRecordingSettings}
+                          class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+                        >
+                          Open Settings
+                        </button>
+                        <button
+                          onclick={checkPermission}
+                          class="px-3 py-1.5 rounded-lg text-xs font-medium border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text transition-colors"
+                        >
+                          Recheck
+                        </button>
+                      </div>
+                    </div>
+                  {:else}
+                    <!-- Permission granted -->
+                    <div class="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center shrink-0">
+                      <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                    <div class="flex-1">
+                      <span class="block text-sm font-medium text-green-400">Screen Recording Enabled</span>
+                      <span class="block text-xs text-phantom-ear-text-muted mt-0.5">Detection is ready</span>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          {/if}
+        </div>
 
         <!-- Speech Recognition Section -->
         <div class="space-y-3">

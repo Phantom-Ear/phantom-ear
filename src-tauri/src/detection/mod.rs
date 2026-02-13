@@ -5,10 +5,31 @@
 use std::collections::HashSet;
 use x_win::{get_open_windows, WindowInfo};
 
+/// Known browser process names (lowercase)
+const BROWSER_HINTS: &[&str] = &[
+    "chrome",
+    "safari",
+    "firefox",
+    "edge",
+    "brave",
+    "arc",
+    "opera",
+    "chromium",
+    "vivaldi",
+];
+
+/// Check if an app name or exec name matches any known browser
+fn is_browser(app_name: &str, exec_name: &str) -> bool {
+    BROWSER_HINTS.iter().any(|browser| {
+        app_name.contains(browser) || exec_name.contains(browser)
+    })
+}
+
 /// Pattern for detecting an active meeting based on window titles
 #[derive(Debug, Clone)]
 pub struct MeetingPattern {
     /// App name hint (optional, for faster filtering)
+    /// Special value: "BROWSER" means any browser app
     pub app_hint: &'static str,
     /// Window title patterns - if any matches, it's an active meeting
     pub title_patterns: &'static [&'static str],
@@ -45,7 +66,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Google Meet: Browser tab with meet.google.com or specific patterns
     MeetingPattern {
-        app_hint: "", // Any browser
+        app_hint: "BROWSER", // Only match in browser windows
         title_patterns: &[
             "meet.google.com",
             "Meet -",
@@ -82,12 +103,12 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
         display_name: "Discord",
     },
     // =========================================================================
-    // Browser-based meetings (app_hint: "" matches any browser)
+    // Browser-based meetings (app_hint: "BROWSER" matches only browser apps)
     // =========================================================================
     // Microsoft Teams Web (teams.microsoft.com in browser)
     // Browser title shows: "Meeting with John | Microsoft Teams" or similar
     MeetingPattern {
-        app_hint: "", // Any browser (Chrome, Safari, Firefox, Edge)
+        app_hint: "BROWSER", // Only match browser windows (Chrome, Safari, Firefox, Edge, etc.)
         title_patterns: &[
             "| Microsoft Teams",      // Browser shows "Meeting | Microsoft Teams"
             "teams.microsoft.com",    // URL in title
@@ -96,7 +117,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Zoom Web Client (zoom.us/j/... in browser)
     MeetingPattern {
-        app_hint: "", // Any browser
+        app_hint: "BROWSER", // Only match browser windows
         title_patterns: &[
             "join.zoom.us",           // Zoom web meeting URL
             "zoom.us/j/",             // Alternative URL format
@@ -106,7 +127,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Webex Web (webex.com in browser)
     MeetingPattern {
-        app_hint: "", // Any browser
+        app_hint: "BROWSER", // Only match browser windows
         title_patterns: &[
             "webex.com",              // Webex web URL
             ".webex.com",             // Subdomain variant
@@ -127,6 +148,8 @@ pub struct MeetingDetector {
     last_detected: Option<DetectedMeeting>,
     /// Track which apps we've already notified about (to avoid spam)
     notified_apps: HashSet<String>,
+    /// Track which apps user has dismissed (persists until meeting ends)
+    dismissed_apps: HashSet<String>,
 }
 
 impl MeetingDetector {
@@ -134,6 +157,7 @@ impl MeetingDetector {
         Self {
             last_detected: None,
             notified_apps: HashSet::new(),
+            dismissed_apps: HashSet::new(),
         }
     }
 
@@ -161,24 +185,27 @@ impl MeetingDetector {
 
         match found_meeting {
             Some(detected) => {
-                // Check if we've already notified about this app
-                if !self.notified_apps.contains(&detected.app_name) {
+                // Check if we've already notified OR user dismissed this app
+                if self.notified_apps.contains(&detected.app_name)
+                    || self.dismissed_apps.contains(&detected.app_name)
+                {
+                    // Already notified or dismissed - silently update last_detected, don't return
+                    self.last_detected = Some(detected);
+                    None
+                } else {
                     log::info!("NEW meeting detected: {} ({})", detected.app_name, detected.process_name);
                     self.notified_apps.insert(detected.app_name.clone());
                     self.last_detected = Some(detected.clone());
                     Some(detected)
-                } else {
-                    // Already notified - silently update last_detected, don't return
-                    self.last_detected = Some(detected);
-                    None
                 }
             }
             None => {
                 // No active meeting found - clear tracking so we can notify again later
                 if self.last_detected.is_some() {
-                    log::info!("Meeting ended - clearing notification tracking");
+                    log::info!("Meeting ended - clearing all notification tracking");
                     self.last_detected = None;
                     self.notified_apps.clear();
+                    self.dismissed_apps.clear(); // Also clear dismissed when meeting actually ends
                 }
                 None
             }
@@ -199,9 +226,16 @@ impl MeetingDetector {
 
         for pattern in MEETING_PATTERNS {
             // Check if app name or exec name matches (if specified)
-            let app_matches = pattern.app_hint.is_empty()
-                || app_name.contains(pattern.app_hint)
-                || exec_name.contains(pattern.app_hint);
+            let app_matches = if pattern.app_hint == "BROWSER" {
+                // Special case: only match browser windows
+                is_browser(&app_name, &exec_name)
+            } else if pattern.app_hint.is_empty() {
+                // Empty hint matches any app
+                true
+            } else {
+                // Specific app hint
+                app_name.contains(pattern.app_hint) || exec_name.contains(pattern.app_hint)
+            };
 
             if !app_matches {
                 continue;
@@ -245,9 +279,24 @@ impl MeetingDetector {
         self.last_detected.as_ref()
     }
 
-    /// Clear notification tracking (call when user dismisses notification or starts recording)
+    /// Dismiss current meeting notification (call when user clicks "Not Now")
+    /// This adds the current meeting to dismissed_apps so it won't notify again
+    /// until the meeting actually ends
+    pub fn dismiss_notification(&mut self) {
+        if let Some(ref detected) = self.last_detected {
+            log::info!("User dismissed notification for: {}", detected.app_name);
+            self.dismissed_apps.insert(detected.app_name.clone());
+        }
+        // Also clear from notified_apps so we can track it properly
+        if let Some(ref detected) = self.last_detected {
+            self.notified_apps.remove(&detected.app_name);
+        }
+    }
+
+    /// Clear all notification tracking (call when user starts recording or meeting ends)
     pub fn clear_notifications(&mut self) {
         self.notified_apps.clear();
+        self.dismissed_apps.clear();
     }
 
     /// Check if a specific app has been notified
