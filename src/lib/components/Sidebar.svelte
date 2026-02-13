@@ -123,25 +123,41 @@
   tabindex="0"
   class="flex flex-col h-full bg-phantom-ear-surface border-r border-phantom-ear-border transition-all duration-200 ease-in-out {collapsed ? 'w-16' : 'w-64'} focus:outline-none"
 >
-  <!-- Header: Search -->
+  <!-- Header: Search + Collapse Toggle -->
   <div class="px-3 pt-3 pb-2">
-    {#if !collapsed}
-      <div class="relative">
-        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    <div class="flex items-center gap-2">
+      {#if !collapsed}
+        <div class="relative flex-1">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search..."
+            value={localSearchQuery}
+            oninput={handleSearchInput}
+            onclick={() => onOpenSearchOverlay?.()}
+            readonly
+            class="w-full pl-8 pr-8 py-2 text-xs bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors cursor-pointer"
+          />
+          <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-phantom-ear-text-muted bg-phantom-ear-surface-hover px-1.5 py-0.5 rounded">⌘K</span>
+        </div>
+      {/if}
+      <!-- Collapse Toggle Button -->
+      <button
+        onclick={onToggle}
+        class="p-2 rounded-lg text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text transition-colors shrink-0"
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {#if collapsed}
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+          {:else}
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+          {/if}
         </svg>
-        <input
-          type="text"
-          placeholder="Search..."
-          value={localSearchQuery}
-          oninput={handleSearchInput}
-          onclick={() => onOpenSearchOverlay?.()}
-          readonly
-          class="w-full pl-8 pr-8 py-2 text-xs bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors cursor-pointer"
-        />
-        <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-phantom-ear-text-muted bg-phantom-ear-surface-hover px-1.5 py-0.5 rounded">⌘K</span>
-      </div>
-    {/if}
+      </button>
+    </div>
   </div>
 
   <!-- Navigation - Vertical Column -->
