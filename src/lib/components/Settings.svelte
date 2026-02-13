@@ -157,23 +157,21 @@
 <!-- Modal / Inline Container -->
 <div class="{inline ? 'flex flex-col h-full min-h-0 overflow-hidden' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
   <!-- Header -->
-  <div class="flex items-center justify-between px-6 py-4 border-b border-phantom-ear-border/50 shrink-0">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-lg bg-gradient-accent flex items-center justify-center">
-        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </div>
-      <h2 class="text-lg font-semibold text-phantom-ear-text">Settings</h2>
+  <div class="flex items-center justify-between px-4 py-3 border-b border-phantom-ear-border/50 shrink-0">
+    <div class="flex items-center gap-2">
+      <svg class="w-5 h-5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+      <h2 class="text-sm font-semibold text-phantom-ear-text">Settings</h2>
     </div>
     {#if !inline}
       <button
         onclick={onClose}
-        class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors"
-        title="Close settings"
+        class="p-1.5 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors"
+        title="Close"
       >
-        <svg class="w-5 h-5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
@@ -186,89 +184,65 @@
     </div>
   {:else}
     <!-- Tabs -->
-    <div class="flex border-b border-phantom-ear-border/50 px-2 shrink-0">
+    <div class="flex border-b border-phantom-ear-border/50 px-3 shrink-0">
       <button
         onclick={() => activeTab = "general"}
-        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:text-phantom-ear-text'}"
+        class="relative px-3 py-2 text-xs font-medium transition-colors {activeTab === 'general' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:text-phantom-ear-text'}"
       >
-        <span class="relative z-10 flex items-center justify-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-          </svg>
-          General
-        </span>
+        General
         {#if activeTab === 'general'}
-          <div class="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-accent rounded-full"></div>
+          <div class="absolute bottom-0 left-1 right-1 h-0.5 bg-phantom-ear-accent rounded-full"></div>
         {/if}
       </button>
       <button
         onclick={() => activeTab = "llm"}
-        class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'llm' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:text-phantom-ear-text'}"
+        class="relative px-3 py-2 text-xs font-medium transition-colors {activeTab === 'llm' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:text-phantom-ear-text'}"
       >
-        <span class="relative z-10 flex items-center justify-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-          LLM
-        </span>
+        LLM
         {#if activeTab === 'llm'}
-          <div class="absolute bottom-0 left-2 right-2 h-0.5 bg-gradient-accent rounded-full"></div>
+          <div class="absolute bottom-0 left-1 right-1 h-0.5 bg-phantom-ear-accent rounded-full"></div>
         {/if}
       </button>
     </div>
 
     <!-- Content -->
-    <div class="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
+    <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
       {#if activeTab === "general"}
-        <!-- Language -->
-        <div>
-          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-            Transcription Language
-          </label>
-          <select
-            bind:value={settings.language}
-            class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text focus:outline-none focus:border-phantom-ear-accent transition-colors"
-          >
-            {#each languages as lang}
-              <option value={lang.code}>{lang.name}</option>
-            {/each}
-          </select>
-          <p class="mt-1 text-xs text-phantom-ear-text-muted">
-            Choose "Auto-detect" if speakers use multiple languages
-          </p>
-        </div>
-
-        <!-- Audio Input Device -->
-        <div>
-          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-            Audio Input Device
-          </label>
-          <select
-            bind:value={settings.audio_device}
-            class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text focus:outline-none focus:border-phantom-ear-accent transition-colors"
-          >
-            <option value={null}>Default Device</option>
-            {#each audioDevices as device}
-              <option value={device.name}>
-                {device.name} {device.is_default ? '(System Default)' : ''}
-              </option>
-            {/each}
-          </select>
-          <p class="mt-1 text-xs text-phantom-ear-text-muted">
-            Select the microphone to use for recording
-          </p>
+        <!-- Language & Audio Row -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">Language</label>
+            <select
+              bind:value={settings.language}
+              class="w-full px-3 py-2 bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-sm text-phantom-ear-text focus:outline-none focus:border-phantom-ear-accent transition-colors"
+            >
+              {#each languages as lang}
+                <option value={lang.code}>{lang.name}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">Audio Device</label>
+            <select
+              bind:value={settings.audio_device}
+              class="w-full px-3 py-2 bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-sm text-phantom-ear-text focus:outline-none focus:border-phantom-ear-accent transition-colors"
+            >
+              <option value={null}>Default</option>
+              {#each audioDevices as device}
+                <option value={device.name}>{device.name}</option>
+              {/each}
+            </select>
+          </div>
         </div>
 
         <!-- ASR Backend -->
         <div>
-          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-            Speech Recognition Engine
-          </label>
-          <div class="space-y-2">
+          <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">Speech Recognition</label>
+          <div class="space-y-1.5">
             {#each asrBackends as backend}
               {@const isParakeet = backend.backend_type === "parakeet"}
               <label
-                class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.asr_backend === backend.backend_type ? 'border-phantom-ear-accent bg-phantom-ear-accent/10' : 'border-phantom-ear-border hover:border-phantom-ear-text-muted'} {isParakeet ? 'opacity-60' : ''}"
+                class="flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors {settings.asr_backend === backend.backend_type ? 'border-phantom-ear-accent bg-phantom-ear-accent/10' : 'border-phantom-ear-border hover:border-phantom-ear-text-muted'} {isParakeet ? 'opacity-50' : ''}"
               >
                 <input
                   type="radio"
@@ -278,18 +252,17 @@
                   disabled={isParakeet}
                   class="sr-only"
                 />
-                <div class="flex-1">
+                <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-phantom-ear-text">{backend.name}</span>
+                    <span class="text-sm text-phantom-ear-text">{backend.name}</span>
                     {#if isParakeet}
-                      <span class="text-xs px-2 py-0.5 rounded-full bg-phantom-ear-warning/20 text-phantom-ear-warning">Coming Soon</span>
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-phantom-ear-warning/20 text-phantom-ear-warning">Soon</span>
                     {/if}
                   </div>
-                  <p class="text-xs text-phantom-ear-text-muted mt-0.5">{backend.description}</p>
                 </div>
-                <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.asr_backend === backend.backend_type ? 'border-phantom-ear-accent' : 'border-phantom-ear-border'}">
+                <div class="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 {settings.asr_backend === backend.backend_type ? 'border-phantom-ear-accent' : 'border-phantom-ear-border'}">
                   {#if settings.asr_backend === backend.backend_type}
-                    <div class="w-2 h-2 rounded-full bg-phantom-ear-accent"></div>
+                    <div class="w-1.5 h-1.5 rounded-full bg-phantom-ear-accent"></div>
                   {/if}
                 </div>
               </label>
@@ -300,13 +273,11 @@
         <!-- Whisper Model (only show when Whisper is selected) -->
         {#if settings.asr_backend === "whisper"}
           <div>
-            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-              Whisper Model
-            </label>
-            <div class="space-y-2">
+            <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">Whisper Model</label>
+            <div class="space-y-1.5">
               {#each models as model}
                 <label
-                  class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors {settings.whisper_model === model.name ? 'border-phantom-ear-accent bg-phantom-ear-accent/10' : 'border-phantom-ear-border hover:border-phantom-ear-text-muted'}"
+                  class="flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors {settings.whisper_model === model.name ? 'border-phantom-ear-accent bg-phantom-ear-accent/10' : 'border-phantom-ear-border hover:border-phantom-ear-text-muted'}"
                 >
                   <input
                     type="radio"
@@ -315,19 +286,18 @@
                     bind:group={settings.whisper_model}
                     class="sr-only"
                   />
-                  <div class="flex-1">
+                  <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
-                      <span class="text-sm font-medium text-phantom-ear-text capitalize">{model.name}</span>
-                      <span class="text-xs text-phantom-ear-text-muted">{model.size_mb} MB</span>
+                      <span class="text-sm text-phantom-ear-text capitalize">{model.name}</span>
+                      <span class="text-[10px] text-phantom-ear-text-muted">{model.size_mb}MB</span>
                       {#if model.downloaded}
-                        <span class="text-xs text-phantom-ear-success">Downloaded</span>
+                        <span class="text-[10px] text-phantom-ear-success">Ready</span>
                       {/if}
                     </div>
-                    <p class="text-xs text-phantom-ear-text-muted mt-0.5">{model.description}</p>
                   </div>
-                  <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center {settings.whisper_model === model.name ? 'border-phantom-ear-accent' : 'border-phantom-ear-border'}">
+                  <div class="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 {settings.whisper_model === model.name ? 'border-phantom-ear-accent' : 'border-phantom-ear-border'}">
                     {#if settings.whisper_model === model.name}
-                      <div class="w-2 h-2 rounded-full bg-phantom-ear-accent"></div>
+                      <div class="w-1.5 h-1.5 rounded-full bg-phantom-ear-accent"></div>
                     {/if}
                   </div>
                 </label>
@@ -335,69 +305,48 @@
             </div>
 
             <!-- Import Model -->
-            <div class="mt-3 flex items-center gap-2">
-              <button
-                onclick={importModelFile}
-                disabled={isImporting}
-                class="px-3 py-2 rounded-lg text-xs font-medium border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-text-muted transition-colors disabled:opacity-50"
-              >
-                {#if isImporting}
-                  Importing...
-                {:else}
-                  Import Model File
-                {/if}
-              </button>
-              <span class="text-xs text-phantom-ear-text-muted">
-                Have a .bin file? Import it directly.
-              </span>
-            </div>
+            <button
+              onclick={importModelFile}
+              disabled={isImporting}
+              class="mt-2 px-2.5 py-1.5 rounded text-[11px] font-medium border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-text-muted transition-colors disabled:opacity-50"
+            >
+              {isImporting ? 'Importing...' : 'Import .bin file'}
+            </button>
             {#if importError}
-              <p class="mt-2 text-xs text-phantom-ear-danger">{importError}</p>
+              <p class="mt-1 text-[11px] text-phantom-ear-danger">{importError}</p>
             {/if}
             {#if importSuccess}
-              <p class="mt-2 text-xs text-phantom-ear-success">{importSuccess}</p>
+              <p class="mt-1 text-[11px] text-phantom-ear-success">{importSuccess}</p>
             {/if}
           </div>
         {/if}
 
         <!-- Help Section -->
-        <div class="pt-4 border-t border-phantom-ear-border/50">
-          <label class="block text-sm font-medium text-phantom-ear-text mb-3">
-            Help & Support
-          </label>
-          <div class="space-y-2">
+        <div class="pt-3 border-t border-phantom-ear-border/50">
+          <label class="block text-xs font-medium text-phantom-ear-text-muted mb-2">Help</label>
+          <div class="flex gap-2">
             {#if onShowOnboarding}
               <button
                 onclick={() => {
                   onShowOnboarding();
                   onClose();
                 }}
-                class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-phantom-ear-border hover:border-phantom-ear-accent/50 hover:bg-phantom-ear-accent/5 transition-colors text-left"
+                class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-phantom-ear-border hover:border-phantom-ear-accent/50 hover:bg-phantom-ear-accent/5 transition-colors"
               >
-                <div class="w-8 h-8 rounded-lg bg-phantom-ear-accent/20 flex items-center justify-center">
-                  <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <span class="text-sm font-medium text-phantom-ear-text">View Onboarding Tour</span>
-                  <p class="text-xs text-phantom-ear-text-muted">Learn about PhantomEar's features</p>
-                </div>
+                <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span class="text-xs text-phantom-ear-text">Tour</span>
               </button>
             {/if}
             <button
               onclick={() => openUrl("https://github.com/Phantom-Ear/phantom-ear")}
-              class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-phantom-ear-border hover:border-phantom-ear-text-muted transition-colors text-left"
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-phantom-ear-border hover:border-phantom-ear-text-muted transition-colors"
             >
-              <div class="w-8 h-8 rounded-lg bg-phantom-ear-surface flex items-center justify-center">
-                <svg class="w-4 h-4 text-phantom-ear-text-muted" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-                </svg>
-              </div>
-              <div>
-                <span class="text-sm font-medium text-phantom-ear-text">GitHub Repository</span>
-                <p class="text-xs text-phantom-ear-text-muted">Report issues or contribute</p>
-              </div>
+              <svg class="w-4 h-4 text-phantom-ear-text-muted" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+              </svg>
+              <span class="text-xs text-phantom-ear-text">GitHub</span>
             </button>
           </div>
         </div>
@@ -405,19 +354,17 @@
       {:else if activeTab === "llm"}
         <!-- LLM Provider -->
         <div>
-          <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-            LLM Provider
-          </label>
+          <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">Provider</label>
           <div class="flex gap-2">
             <button
               onclick={() => settings.llm_provider = "ollama"}
-              class="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-colors {settings.llm_provider === 'ollama' ? 'bg-phantom-ear-accent text-white' : 'bg-phantom-ear-bg border border-phantom-ear-border text-phantom-ear-text hover:border-phantom-ear-text-muted'}"
+              class="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors {settings.llm_provider === 'ollama' ? 'bg-phantom-ear-accent text-white' : 'bg-phantom-ear-bg border border-phantom-ear-border text-phantom-ear-text hover:border-phantom-ear-text-muted'}"
             >
-              Ollama (Local)
+              Ollama
             </button>
             <button
               onclick={() => settings.llm_provider = "openai"}
-              class="flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-colors {settings.llm_provider === 'openai' ? 'bg-phantom-ear-accent text-white' : 'bg-phantom-ear-bg border border-phantom-ear-border text-phantom-ear-text hover:border-phantom-ear-text-muted'}"
+              class="flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors {settings.llm_provider === 'openai' ? 'bg-phantom-ear-accent text-white' : 'bg-phantom-ear-bg border border-phantom-ear-border text-phantom-ear-text hover:border-phantom-ear-text-muted'}"
             >
               OpenAI
             </button>
@@ -425,60 +372,50 @@
         </div>
 
         {#if settings.llm_provider === "ollama"}
-          <!-- Ollama URL -->
-          <div>
-            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-              Ollama URL
-            </label>
-            <input
-              type="text"
-              bind:value={settings.ollama_url}
-              placeholder="http://localhost:11434"
-              class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
-            />
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">URL</label>
+              <input
+                type="text"
+                bind:value={settings.ollama_url}
+                placeholder="http://localhost:11434"
+                class="w-full px-3 py-2 bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">Model</label>
+              <input
+                type="text"
+                bind:value={settings.ollama_model}
+                placeholder="llama3.2"
+                class="w-full px-3 py-2 bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
+              />
+            </div>
           </div>
-
-          <!-- Ollama Model -->
-          <div>
-            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-              Model Name
-            </label>
-            <input
-              type="text"
-              bind:value={settings.ollama_model}
-              placeholder="llama3.2"
-              class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
-            />
-            <p class="mt-1 text-xs text-phantom-ear-text-muted">
-              Make sure the model is pulled: <code class="text-phantom-ear-accent">ollama pull llama3.2</code>
-            </p>
-          </div>
+          <p class="text-[11px] text-phantom-ear-text-muted">
+            Pull model: <code class="text-phantom-ear-accent">ollama pull llama3.2</code>
+          </p>
         {:else}
-          <!-- OpenAI API Key -->
           <div>
-            <label class="block text-sm font-medium text-phantom-ear-text mb-2">
-              OpenAI API Key
-            </label>
+            <label class="block text-xs font-medium text-phantom-ear-text-muted mb-1.5">API Key</label>
             <input
               type="password"
               bind:value={settings.openai_api_key}
               placeholder="sk-..."
-              class="w-full px-4 py-3 bg-phantom-ear-bg border border-phantom-ear-border rounded-xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
+              class="w-full px-3 py-2 bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
             />
-            <p class="mt-1 text-xs text-phantom-ear-text-muted">
-              Your API key is stored locally and never shared
-            </p>
+            <p class="mt-1 text-[11px] text-phantom-ear-text-muted">Stored locally, never shared</p>
           </div>
         {/if}
       {/if}
     </div>
 
     <!-- Footer -->
-    <div class="flex justify-end gap-3 px-6 py-4 border-t border-phantom-ear-border/50 shrink-0">
+    <div class="flex justify-end gap-2 px-4 py-3 border-t border-phantom-ear-border/50 shrink-0">
       {#if !inline}
         <button
           onclick={onClose}
-          class="px-4 py-2.5 rounded-xl text-sm font-medium text-phantom-ear-text-muted hover:text-phantom-ear-text hover:bg-phantom-ear-surface transition-colors"
+          class="px-3 py-2 rounded-lg text-sm text-phantom-ear-text-muted hover:text-phantom-ear-text hover:bg-phantom-ear-surface transition-colors"
         >
           Cancel
         </button>
@@ -486,18 +423,18 @@
       <button
         onclick={saveSettings}
         disabled={isSaving}
-        class="px-5 py-2.5 bg-gradient-accent hover:bg-gradient-accent-hover rounded-xl text-sm font-medium text-white transition-all hover-lift disabled:opacity-50 disabled:hover:transform-none btn-shine"
+        class="px-4 py-2 bg-gradient-accent rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50"
       >
         {#if isSaving}
           <span class="flex items-center gap-2">
-            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
             </svg>
             Saving...
           </span>
         {:else}
-          Save Changes
+          Save
         {/if}
       </button>
     </div>

@@ -123,27 +123,9 @@
   tabindex="0"
   class="flex flex-col h-full bg-phantom-ear-surface border-r border-phantom-ear-border transition-all duration-200 ease-in-out {collapsed ? 'w-16' : 'w-64'} focus:outline-none"
 >
-  <!-- Header: Toggle + Quick Record -->
-  <div class="px-3 pt-3 pb-2 border-b border-phantom-ear-border/50">
+  <!-- Header: Search -->
+  <div class="px-3 pt-3 pb-2">
     {#if !collapsed}
-      <!-- Quick Record Button -->
-      <button
-        onclick={() => onToggleRecording?.()}
-        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-2 transition-all {isRecording ? 'bg-phantom-ear-danger/15 border border-phantom-ear-danger/30 text-phantom-ear-danger' : 'bg-gradient-to-r from-phantom-ear-accent to-phantom-ear-purple text-white hover:opacity-90'}"
-        title={isRecording ? 'Stop recording' : 'Start recording'}
-      >
-        {#if isRecording}
-          <span class="w-2 h-2 rounded-full bg-phantom-ear-danger animate-pulse"></span>
-          <span class="text-sm font-medium">Recording...</span>
-        {:else}
-          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="6" />
-          </svg>
-          <span class="text-sm font-medium">New Recording</span>
-        {/if}
-      </button>
-
-      <!-- Search -->
       <div class="relative">
         <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -159,29 +141,33 @@
         />
         <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-phantom-ear-text-muted bg-phantom-ear-surface-hover px-1.5 py-0.5 rounded">⌘K</span>
       </div>
-    {:else}
-      <!-- Collapsed: Quick Record Button -->
-      <div class="flex flex-col items-center">
-        <button
-          onclick={() => onToggleRecording?.()}
-          class="p-2.5 rounded-xl transition-all {isRecording ? 'bg-phantom-ear-danger/15 text-phantom-ear-danger' : 'bg-gradient-to-r from-phantom-ear-accent to-phantom-ear-purple text-white hover:opacity-90'}"
-          title={isRecording ? 'Stop recording' : 'Start recording'}
-        >
-          {#if isRecording}
-            <span class="block w-4 h-4 rounded-full bg-phantom-ear-danger animate-pulse"></span>
-          {:else}
-            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="6" />
-            </svg>
-          {/if}
-        </button>
-      </div>
     {/if}
   </div>
 
   <!-- Navigation - Vertical Column -->
   <nav class="px-2 py-2">
     <div class="flex flex-col gap-0.5">
+      <!-- New Recording Button - same style as nav items -->
+      <button
+        onclick={() => onToggleRecording?.()}
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {isRecording ? 'bg-phantom-ear-danger/10 text-phantom-ear-danger' : 'text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text'}"
+        title={collapsed ? (isRecording ? 'Stop recording' : 'New Recording') : undefined}
+      >
+        {#if isRecording}
+          <span class="w-5 h-5 flex items-center justify-center shrink-0">
+            <span class="w-2.5 h-2.5 rounded-full bg-phantom-ear-danger animate-pulse"></span>
+          </span>
+        {:else}
+          <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="4" fill="currentColor" />
+            <circle cx="12" cy="12" r="8" stroke-width="2" />
+          </svg>
+        {/if}
+        {#if !collapsed}
+          <span class="text-sm font-medium">{isRecording ? 'Recording...' : 'New Recording'}</span>
+        {/if}
+      </button>
+
       {#each navItems as item}
         <button
           onclick={() => onNavigate(item.view)}
