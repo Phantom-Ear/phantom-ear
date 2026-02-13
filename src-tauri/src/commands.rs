@@ -6,6 +6,7 @@ use crate::asr::AsrBackendType;
 #[cfg(feature = "parakeet")]
 use crate::asr::parakeet_backend::ParakeetModel;
 use crate::audio::AudioCapture;
+use crate::detection::MeetingDetector;
 use crate::embeddings::{self, EmbeddingModel};
 use crate::llm::{LlmClient, LlmProvider};
 use crate::models::{self, ModelInfo};
@@ -14,7 +15,8 @@ use crate::transcription::TranscriptionConfig;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 // ============================================================================
@@ -113,6 +115,19 @@ pub struct EmbeddingStatus {
     pub total_segments: u64,
 }
 
+/// Event emitted when a meeting app is detected
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MeetingDetectedEvent {
+    pub app_name: String,
+    pub message: String,
+}
+
+/// Event emitted when all meeting apps have closed
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MeetingEndedEvent {
+    pub message: String,
+}
+
 // ============================================================================
 // App State
 // ============================================================================
@@ -127,6 +142,9 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub active_meeting_id: Arc<Mutex<Option<String>>>,
     pub embedding_model: Arc<Mutex<Option<EmbeddingModel>>>,
+    // Meeting detection
+    pub meeting_detector: Arc<Mutex<MeetingDetector>>,
+    pub detection_running: Arc<AtomicBool>,
 }
 
 // ============================================================================
@@ -1689,5 +1707,216 @@ pub async fn get_audio_level(state: State<'_, AppState>) -> Result<f32, String> 
     match audio.as_ref() {
         Some(capture) => Ok(capture.get_rms_level()),
         None => Ok(0.0),
+    }
+}
+
+// ============================================================================
+// Meeting Detection Commands
+// ============================================================================
+
+/// Start automatic meeting detection (polls every 5 seconds)
+#[tauri::command]
+pub async fn start_meeting_detection(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Check if detection is already running
+    if state.detection_running.load(Ordering::SeqCst) {
+        return Ok(()); // Already running, no-op
+    }
+
+    // Check if auto-detect is enabled in settings
+    {
+        let settings = state.settings.lock().await;
+        if !settings.auto_detect_meetings {
+            return Err("Meeting detection is disabled in settings".to_string());
+        }
+    }
+
+    state.detection_running.store(true, Ordering::SeqCst);
+    log::info!("Meeting detection started");
+
+    let detector_arc = state.meeting_detector.clone();
+    let detection_running = state.detection_running.clone();
+    let is_recording = state.is_recording.clone();
+    let settings_arc = state.settings.clone();
+
+    // Spawn background detection loop
+    tauri::async_runtime::spawn(async move {
+        let mut last_meeting_active = false;
+
+        loop {
+            // Check if we should stop
+            if !detection_running.load(Ordering::SeqCst) {
+                log::info!("Meeting detection stopped");
+                break;
+            }
+
+            // Skip detection if already recording
+            let recording = *is_recording.lock().await;
+            if recording {
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                continue;
+            }
+
+            // Detect meetings
+            let mut detector = detector_arc.lock().await;
+
+            // Check for new meeting detected
+            if let Some(detected) = detector.detect_meeting() {
+                log::info!("Meeting detected: {} ({})", detected.app_name, detected.process_name);
+
+                // Check if system notifications are enabled
+                let show_system_notifications = {
+                    let settings = settings_arc.lock().await;
+                    settings.show_system_notifications
+                };
+
+                // Send native OS notification (if enabled)
+                #[cfg(desktop)]
+                if show_system_notifications {
+                    use tauri_plugin_notification::NotificationExt;
+                    if let Err(e) = app.notification()
+                        .builder()
+                        .title("Meeting Detected")
+                        .body(&format!("{} is running. Would you like to start recording?", detected.app_name))
+                        .show()
+                    {
+                        log::warn!("Failed to send native notification: {}", e);
+                    }
+                }
+
+                // Also emit in-app notification event (always)
+                let event = MeetingDetectedEvent {
+                    app_name: detected.app_name.clone(),
+                    message: format!("{} detected! Would you like to start recording?", detected.app_name),
+                };
+
+                if let Err(e) = app.emit("meeting-detected", &event) {
+                    log::error!("Failed to emit meeting-detected event: {}", e);
+                }
+
+                last_meeting_active = true;
+            } else if last_meeting_active {
+                // Check if meeting is still running
+                if detector.is_meeting_running().is_none() {
+                    log::info!("Meeting ended");
+
+                    let event = MeetingEndedEvent {
+                        message: "Meeting app closed".to_string(),
+                    };
+
+                    if let Err(e) = app.emit("meeting-ended", &event) {
+                        log::error!("Failed to emit meeting-ended event: {}", e);
+                    }
+
+                    last_meeting_active = false;
+                }
+            }
+
+            drop(detector);
+
+            // Poll every 5 seconds
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
+    });
+
+    Ok(())
+}
+
+/// Stop automatic meeting detection
+#[tauri::command]
+pub async fn stop_meeting_detection(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.detection_running.store(false, Ordering::SeqCst);
+
+    // Clear notification tracking
+    let mut detector = state.meeting_detector.lock().await;
+    detector.clear_notifications();
+
+    log::info!("Meeting detection stopped");
+    Ok(())
+}
+
+/// Check if meeting detection is currently running
+#[tauri::command]
+pub async fn is_meeting_detection_running(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(state.detection_running.load(Ordering::SeqCst))
+}
+
+/// Dismiss the current meeting detection notification
+/// Keeps the meeting in "dismissed" state until it actually ends,
+/// preventing repeated notifications for the same meeting
+#[tauri::command]
+pub async fn dismiss_meeting_notification(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut detector = state.meeting_detector.lock().await;
+    detector.dismiss_notification(); // Mark as dismissed, not cleared
+    log::info!("Meeting notification dismissed (will not re-notify until meeting ends)");
+    Ok(())
+}
+
+/// Check if a meeting app is currently running (one-shot check)
+#[tauri::command]
+pub async fn check_meeting_running(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let mut detector = state.meeting_detector.lock().await;
+    Ok(detector.is_meeting_running().map(|d| d.app_name))
+}
+
+/// Check if Screen Recording permission is granted (macOS only)
+/// Returns true if we can read OTHER apps' window titles, false otherwise
+#[tauri::command]
+pub async fn check_screen_recording_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Use the improved permission check that tests reading OTHER apps' window titles
+        Ok(MeetingDetector::has_screen_recording_permission())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On Windows/Linux, no special permission needed
+        Ok(true)
+    }
+}
+
+/// Open Screen Recording settings (macOS) or return info for other platforms
+#[tauri::command]
+pub async fn open_screen_recording_settings() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        // Open System Preferences > Privacy & Security > Screen Recording
+        let result = Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .spawn();
+
+        match result {
+            Ok(_) => {
+                log::info!("Opened Screen Recording settings");
+                Ok("opened".to_string())
+            }
+            Err(e) => {
+                log::error!("Failed to open Screen Recording settings: {}", e);
+                Err(format!("Failed to open settings: {}", e))
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Ok("not_required".to_string())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Ok("not_required".to_string())
     }
 }
