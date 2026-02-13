@@ -1755,6 +1755,21 @@ pub async fn start_meeting_detection(
             if let Some(detected) = detector.detect_meeting() {
                 log::info!("Meeting detected: {} ({})", detected.app_name, detected.process_name);
 
+                // Send native OS notification
+                #[cfg(desktop)]
+                {
+                    use tauri_plugin_notification::NotificationExt;
+                    if let Err(e) = app.notification()
+                        .builder()
+                        .title("Meeting Detected")
+                        .body(&format!("{} is running. Would you like to start recording?", detected.app_name))
+                        .show()
+                    {
+                        log::warn!("Failed to send native notification: {}", e);
+                    }
+                }
+
+                // Also emit in-app notification event
                 let event = MeetingDetectedEvent {
                     app_name: detected.app_name.clone(),
                     message: format!("{} detected! Would you like to start recording?", detected.app_name),

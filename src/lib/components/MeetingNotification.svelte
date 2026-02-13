@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
+  import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
   interface MeetingDetectedEvent {
     app_name: string;
@@ -24,7 +25,21 @@
   let unlistenEnded: UnlistenFn | null = null;
 
   onMount(async () => {
-    // Listen for meeting detected events
+    // Request notification permission for native OS notifications
+    try {
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === "granted";
+      }
+      if (permissionGranted) {
+        console.log("Native notification permission granted");
+      }
+    } catch (e) {
+      console.warn("Failed to request notification permission:", e);
+    }
+
+    // Listen for meeting detected events (in-app notification)
     unlistenDetected = await listen<MeetingDetectedEvent>("meeting-detected", (event) => {
       if (!isRecording) {
         detectedApp = event.payload.app_name;

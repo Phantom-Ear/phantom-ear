@@ -81,6 +81,38 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
         ],
         display_name: "Discord",
     },
+    // =========================================================================
+    // Browser-based meetings (app_hint: "" matches any browser)
+    // =========================================================================
+    // Microsoft Teams Web (teams.microsoft.com in browser)
+    // Browser title shows: "Meeting with John | Microsoft Teams" or similar
+    MeetingPattern {
+        app_hint: "", // Any browser (Chrome, Safari, Firefox, Edge)
+        title_patterns: &[
+            "| Microsoft Teams",      // Browser shows "Meeting | Microsoft Teams"
+            "teams.microsoft.com",    // URL in title
+        ],
+        display_name: "Microsoft Teams (Web)",
+    },
+    // Zoom Web Client (zoom.us/j/... in browser)
+    MeetingPattern {
+        app_hint: "", // Any browser
+        title_patterns: &[
+            "join.zoom.us",           // Zoom web meeting URL
+            "zoom.us/j/",             // Alternative URL format
+            "Zoom Web Client",        // Web client title
+        ],
+        display_name: "Zoom (Web)",
+    },
+    // Webex Web (webex.com in browser)
+    MeetingPattern {
+        app_hint: "", // Any browser
+        title_patterns: &[
+            "webex.com",              // Webex web URL
+            ".webex.com",             // Subdomain variant
+        ],
+        display_name: "Webex (Web)",
+    },
 ];
 
 /// Result of meeting detection
