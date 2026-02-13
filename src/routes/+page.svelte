@@ -11,6 +11,7 @@
   import TranscriptTimeline from "$lib/components/TranscriptTimeline.svelte";
   import HomeMetrics from "$lib/components/HomeMetrics.svelte";
   import EditableSegment from "$lib/components/EditableSegment.svelte";
+  import Onboarding from "$lib/components/Onboarding.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
   import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
   import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker } from "$lib/types";
@@ -94,6 +95,9 @@
   // Search overlay state
   let showSearchOverlay = $state(false);
 
+  // Onboarding state
+  let showOnboarding = $state(false);
+
   // Keyboard shortcut state
   let sidebarFocused = $state(false);
 
@@ -171,6 +175,11 @@
         models = loadedModels;
         llmProvider = settings.llm_provider;
         llmModelName = settings.ollama_model || "";
+
+        // Check if onboarding should be shown
+        if (!settings.onboarding_completed) {
+          showOnboarding = true;
+        }
       } catch (e) {
         console.error("Failed to load settings:", e);
       }
@@ -834,6 +843,8 @@
 
 {#if !showSplash && needsSetup}
   <Setup onComplete={handleSetupComplete} />
+{:else if !showSplash && showOnboarding}
+  <Onboarding onComplete={() => showOnboarding = false} />
 {:else if !showSplash}
   <div class="flex h-screen bg-phantom-ear-bg no-select">
     <!-- Sidebar -->
@@ -1281,7 +1292,7 @@
 
         {:else if currentView === 'settings'}
           <div class="flex-1 min-h-0 overflow-hidden">
-            <Settings onClose={handleSettingsSaved} inline={true} />
+            <Settings onClose={handleSettingsSaved} inline={true} onShowOnboarding={() => showOnboarding = true} />
           </div>
         {/if}
       </div>

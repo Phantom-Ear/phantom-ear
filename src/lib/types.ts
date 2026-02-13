@@ -51,6 +51,8 @@ export interface Settings {
   ollama_url: string | null;
   ollama_model: string | null;
   auto_detect_meetings: boolean;
+  show_system_notifications: boolean;
+  onboarding_completed: boolean;
   whisper_model: string;
   language: string;
   asr_backend: string;

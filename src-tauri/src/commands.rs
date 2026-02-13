@@ -36,12 +36,20 @@ pub struct Settings {
     pub ollama_url: Option<String>,
     pub ollama_model: Option<String>,
     pub auto_detect_meetings: bool,
+    #[serde(default = "default_true")]
+    pub show_system_notifications: bool,
+    #[serde(default)]
+    pub onboarding_completed: bool,
     pub whisper_model: String,
     pub language: String,
     #[serde(default = "default_asr_backend")]
     pub asr_backend: String,
     #[serde(default)]
     pub audio_device: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_asr_backend() -> String {
@@ -56,6 +64,8 @@ impl Default for Settings {
             ollama_url: Some("http://localhost:11434".to_string()),
             ollama_model: Some("llama3.2".to_string()),
             auto_detect_meetings: false,
+            show_system_notifications: true,
+            onboarding_completed: false,
             whisper_model: "small".to_string(),
             language: "en".to_string(),
             asr_backend: "whisper".to_string(),
