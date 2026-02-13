@@ -67,6 +67,9 @@ directories = "6"
 num_cpus = "1.16"
 sysinfo = "0.32"
 
+# Window title detection for meeting detection
+active-win-pos-rs = "0.8"
+
 # Async trait support
 async-trait = "0.1"
 
