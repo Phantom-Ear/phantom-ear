@@ -1,14 +1,15 @@
 // Meeting detection module
 // Detect ACTIVE meetings (not just running apps) using window title analysis
+// Scans ALL open windows, not just the active one
 
-use active_win_pos_rs::get_active_window;
 use std::collections::HashSet;
+use x_win::{get_open_windows, WindowInfo};
 
 /// Pattern for detecting an active meeting based on window titles
 #[derive(Debug, Clone)]
 pub struct MeetingPattern {
-    /// Process name hint (optional, for faster filtering)
-    pub process_hint: &'static str,
+    /// App name hint (optional, for faster filtering)
+    pub app_hint: &'static str,
     /// Window title patterns - if any matches, it's an active meeting
     pub title_patterns: &'static [&'static str],
     /// Display name for notifications
@@ -20,7 +21,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     // Microsoft Teams: Active call shows "| Microsoft Teams" with meeting info
     // e.g., "Meeting Name | Microsoft | user@email.com | Microsoft Teams"
     MeetingPattern {
-        process_hint: "teams",
+        app_hint: "teams",
         title_patterns: &[
             "| Microsoft Teams",
             "| Microsoft |",
@@ -31,7 +32,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Zoom: Window title contains "Zoom Meeting" when in an active call
     MeetingPattern {
-        process_hint: "zoom",
+        app_hint: "zoom",
         title_patterns: &[
             "Zoom Meeting",
             "zoom meeting",
@@ -40,7 +41,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Google Meet: Browser tab with meet.google.com or specific patterns
     MeetingPattern {
-        process_hint: "", // Any browser
+        app_hint: "", // Any browser
         title_patterns: &[
             "meet.google.com",
             "Meet -",
@@ -50,7 +51,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Webex: Active meeting window
     MeetingPattern {
-        process_hint: "webex",
+        app_hint: "webex",
         title_patterns: &[
             "Webex Meeting",
             "Meeting |",
@@ -60,7 +61,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Slack Huddle: When in a huddle
     MeetingPattern {
-        process_hint: "slack",
+        app_hint: "slack",
         title_patterns: &[
             "Huddle",
             "huddle",
@@ -69,7 +70,7 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     },
     // Discord: Voice channel active
     MeetingPattern {
-        process_hint: "discord",
+        app_hint: "discord",
         title_patterns: &[
             "Voice Connected",
             "Stage Channel",
@@ -90,9 +91,6 @@ pub struct MeetingDetector {
     last_detected: Option<DetectedMeeting>,
     /// Track which apps we've already notified about (to avoid spam)
     notified_apps: HashSet<String>,
-    /// Cache of window titles we've seen (for debugging)
-    #[allow(dead_code)]
-    last_window_title: Option<String>,
 }
 
 impl MeetingDetector {
@@ -100,34 +98,68 @@ impl MeetingDetector {
         Self {
             last_detected: None,
             notified_apps: HashSet::new(),
-            last_window_title: None,
         }
     }
 
-    /// Check if an active meeting is detected by analyzing the active window
+    /// Scan ALL open windows for meeting indicators
     /// Returns Some(DetectedMeeting) if a new meeting is detected (not previously notified)
     pub fn detect_meeting(&mut self) -> Option<DetectedMeeting> {
-        // Get the currently active window
-        let active_window = match get_active_window() {
-            Ok(window) => window,
+        // Get ALL open windows
+        let windows = match get_open_windows() {
+            Ok(w) => w,
             Err(e) => {
-                log::debug!("Failed to get active window: {:?}", e);
+                log::debug!("Failed to get open windows: {:?}", e);
                 return None;
             }
         };
 
-        let title = active_window.title.to_lowercase();
-        let app_name = active_window.app_name.to_lowercase();
+        log::debug!("Scanning {} open windows for meetings", windows.len());
 
-        self.last_window_title = Some(active_window.title.clone());
+        // Check each window against meeting patterns
+        for window in &windows {
+            if let Some(detected) = self.check_window_for_meeting(window) {
+                // Check if we've already notified about this app
+                if !self.notified_apps.contains(&detected.app_name) {
+                    self.notified_apps.insert(detected.app_name.clone());
+                    self.last_detected = Some(detected.clone());
+                    return Some(detected);
+                } else {
+                    // Already notified, just update last_detected
+                    self.last_detected = Some(detected);
+                    return None;
+                }
+            }
+        }
 
-        log::debug!("Active window - app: {}, title: {}", app_name, active_window.title);
+        // No active meeting found - clear last detected and notified apps
+        if self.last_detected.is_some() {
+            log::debug!("No active meeting found in any window");
+            self.last_detected = None;
+            self.notified_apps.clear();
+        }
 
-        // Check each meeting pattern
+        None
+    }
+
+    /// Check a single window against all meeting patterns
+    fn check_window_for_meeting(&self, window: &WindowInfo) -> Option<DetectedMeeting> {
+        let title = window.title.to_lowercase();
+        let app_name = window.info.name.to_lowercase();
+        let exec_name = window.info.exec_name.to_lowercase();
+
+        // Skip windows with empty titles (no Screen Recording permission or minimized)
+        if title.is_empty() {
+            return None;
+        }
+
+        log::trace!("Checking window - app: '{}', exec: '{}', title: '{}'",
+            app_name, exec_name, window.title);
+
         for pattern in MEETING_PATTERNS {
-            // Check if app name matches (if specified)
-            let app_matches = pattern.process_hint.is_empty()
-                || app_name.contains(pattern.process_hint);
+            // Check if app name or exec name matches (if specified)
+            let app_matches = pattern.app_hint.is_empty()
+                || app_name.contains(pattern.app_hint)
+                || exec_name.contains(pattern.app_hint);
 
             if !app_matches {
                 continue;
@@ -139,65 +171,28 @@ impl MeetingDetector {
                 .any(|p| title.contains(&p.to_lowercase()));
 
             if title_matches {
-                let detected = DetectedMeeting {
+                log::info!("Active meeting detected: {} (window: '{}', app: '{}')",
+                    pattern.display_name, window.title, window.info.name);
+                return Some(DetectedMeeting {
                     app_name: pattern.display_name.to_string(),
-                    process_name: active_window.app_name.clone(),
-                };
-
-                // Check if we've already notified about this app
-                if !self.notified_apps.contains(&detected.app_name) {
-                    self.notified_apps.insert(detected.app_name.clone());
-                    self.last_detected = Some(detected.clone());
-                    log::info!("Active meeting detected: {} (window: {})",
-                        pattern.display_name, active_window.title);
-                    return Some(detected);
-                } else {
-                    // Already notified, just update last_detected
-                    self.last_detected = Some(detected);
-                    return None;
-                }
+                    process_name: window.info.name.clone(),
+                });
             }
-        }
-
-        // No active meeting found - clear last detected and notified apps
-        // This allows re-notification if user joins another meeting later
-        if self.last_detected.is_some() {
-            log::debug!("No active meeting in current window");
-            self.last_detected = None;
-            self.notified_apps.clear();
         }
 
         None
     }
 
     /// Check if any meeting app is currently running (without notification tracking)
-    /// This is a simpler check that just returns if an active meeting is found
     pub fn is_meeting_running(&mut self) -> Option<DetectedMeeting> {
-        let active_window = match get_active_window() {
-            Ok(window) => window,
+        let windows = match get_open_windows() {
+            Ok(w) => w,
             Err(_) => return None,
         };
 
-        let title = active_window.title.to_lowercase();
-        let app_name = active_window.app_name.to_lowercase();
-
-        for pattern in MEETING_PATTERNS {
-            let app_matches = pattern.process_hint.is_empty()
-                || app_name.contains(pattern.process_hint);
-
-            if !app_matches {
-                continue;
-            }
-
-            let title_matches = pattern.title_patterns
-                .iter()
-                .any(|p| title.contains(&p.to_lowercase()));
-
-            if title_matches {
-                return Some(DetectedMeeting {
-                    app_name: pattern.display_name.to_string(),
-                    process_name: active_window.app_name.clone(),
-                });
+        for window in &windows {
+            if let Some(detected) = self.check_window_for_meeting(window) {
+                return Some(detected);
             }
         }
 
@@ -221,9 +216,62 @@ impl MeetingDetector {
         self.notified_apps.contains(app_name)
     }
 
-    /// Refresh is a no-op now (we don't need sysinfo refresh for window detection)
+    /// Refresh is a no-op now (we get fresh window list each time)
     pub fn refresh(&mut self) {
         // No-op - window detection doesn't need refresh
+    }
+
+    /// Check if we have Screen Recording permission by testing if we can read other apps' window titles
+    /// Returns true if at least one non-PhantomEar window has a non-empty title
+    pub fn has_screen_recording_permission() -> bool {
+        let windows = match get_open_windows() {
+            Ok(w) => w,
+            Err(e) => {
+                log::warn!("Failed to get windows for permission check: {:?}", e);
+                return false;
+            }
+        };
+
+        // Count windows with non-empty titles that aren't PhantomEar
+        let mut other_app_with_title = false;
+        let mut other_app_without_title = false;
+
+        for window in &windows {
+            let app_name = window.info.name.to_lowercase();
+            let exec_name = window.info.exec_name.to_lowercase();
+
+            // Skip our own app
+            if app_name.contains("phantom") || exec_name.contains("phantom") {
+                continue;
+            }
+
+            // Skip system processes that might not have titles
+            if app_name.is_empty() && exec_name.is_empty() {
+                continue;
+            }
+
+            if !window.title.is_empty() {
+                other_app_with_title = true;
+                log::debug!("Found other app with title: '{}' (app: '{}')", window.title, window.info.name);
+            } else {
+                other_app_without_title = true;
+                log::debug!("Found other app WITHOUT title: app='{}', exec='{}'", window.info.name, window.info.exec_name);
+            }
+        }
+
+        // If we found at least one other app with a title, we likely have permission
+        // If we only found apps without titles, permission is likely denied
+        if other_app_with_title {
+            log::info!("Screen Recording permission check: GRANTED (found apps with readable titles)");
+            true
+        } else if other_app_without_title {
+            log::info!("Screen Recording permission check: DENIED (found apps but titles are empty)");
+            false
+        } else {
+            // No other apps running, can't determine
+            log::info!("Screen Recording permission check: UNKNOWN (no other apps found)");
+            true // Assume granted if we can't tell
+        }
     }
 }
 
