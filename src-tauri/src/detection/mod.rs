@@ -18,15 +18,19 @@ pub struct MeetingPattern {
 
 /// Known meeting patterns - window titles that indicate ACTIVE meetings
 const MEETING_PATTERNS: &[MeetingPattern] = &[
-    // Microsoft Teams: Active call shows "| Microsoft Teams" with meeting info
-    // e.g., "Meeting Name | Microsoft | user@email.com | Microsoft Teams"
+    // Microsoft Teams: Only match actual meeting/call windows
+    // Active meeting windows have patterns like:
+    // - "Meeting with <name>" (actual call)
+    // - "Meeting compact view" (minimized call)
+    // - "<name> | Call" (1:1 call)
+    // DO NOT match: "Calendar |", "Chat |", "Activity |", "Teams |"
     MeetingPattern {
         app_hint: "teams",
         title_patterns: &[
-            "| Microsoft Teams",
-            "| Microsoft |",
-            "Meeting with",
-            "Teams Meeting",
+            "Meeting with",           // "Meeting with John Doe | ..."
+            "Meeting compact view",   // Compact/mini meeting window
+            "| Call |",               // "John Doe | Call | Microsoft Teams"
+            "| call |",               // lowercase variant
         ],
         display_name: "Microsoft Teams",
     },
@@ -102,7 +106,7 @@ impl MeetingDetector {
     }
 
     /// Scan ALL open windows for meeting indicators
-    /// Returns Some(DetectedMeeting) if a new meeting is detected (not previously notified)
+    /// Returns Some(DetectedMeeting) if a NEW meeting is detected (not previously notified)
     pub fn detect_meeting(&mut self) -> Option<DetectedMeeting> {
         // Get ALL open windows
         let windows = match get_open_windows() {
@@ -113,35 +117,44 @@ impl MeetingDetector {
             }
         };
 
-        log::debug!("Scanning {} open windows for meetings", windows.len());
+        // Find the first matching meeting window
+        let mut found_meeting: Option<DetectedMeeting> = None;
 
-        // Check each window against meeting patterns
         for window in &windows {
             if let Some(detected) = self.check_window_for_meeting(window) {
-                // Check if we've already notified about this app
-                if !self.notified_apps.contains(&detected.app_name) {
-                    self.notified_apps.insert(detected.app_name.clone());
-                    self.last_detected = Some(detected.clone());
-                    return Some(detected);
-                } else {
-                    // Already notified, just update last_detected
-                    self.last_detected = Some(detected);
-                    return None;
-                }
+                found_meeting = Some(detected);
+                break; // Stop at first match - no need to scan more windows
             }
         }
 
-        // No active meeting found - clear last detected and notified apps
-        if self.last_detected.is_some() {
-            log::debug!("No active meeting found in any window");
-            self.last_detected = None;
-            self.notified_apps.clear();
+        match found_meeting {
+            Some(detected) => {
+                // Check if we've already notified about this app
+                if !self.notified_apps.contains(&detected.app_name) {
+                    log::info!("NEW meeting detected: {} ({})", detected.app_name, detected.process_name);
+                    self.notified_apps.insert(detected.app_name.clone());
+                    self.last_detected = Some(detected.clone());
+                    Some(detected)
+                } else {
+                    // Already notified - silently update last_detected, don't return
+                    self.last_detected = Some(detected);
+                    None
+                }
+            }
+            None => {
+                // No active meeting found - clear tracking so we can notify again later
+                if self.last_detected.is_some() {
+                    log::info!("Meeting ended - clearing notification tracking");
+                    self.last_detected = None;
+                    self.notified_apps.clear();
+                }
+                None
+            }
         }
-
-        None
     }
 
     /// Check a single window against all meeting patterns
+    /// Note: Does NOT log - caller should log only when actually emitting notification
     fn check_window_for_meeting(&self, window: &WindowInfo) -> Option<DetectedMeeting> {
         let title = window.title.to_lowercase();
         let app_name = window.info.name.to_lowercase();
@@ -151,9 +164,6 @@ impl MeetingDetector {
         if title.is_empty() {
             return None;
         }
-
-        log::trace!("Checking window - app: '{}', exec: '{}', title: '{}'",
-            app_name, exec_name, window.title);
 
         for pattern in MEETING_PATTERNS {
             // Check if app name or exec name matches (if specified)
@@ -171,8 +181,6 @@ impl MeetingDetector {
                 .any(|p| title.contains(&p.to_lowercase()));
 
             if title_matches {
-                log::info!("Active meeting detected: {} (window: '{}', app: '{}')",
-                    pattern.display_name, window.title, window.info.name);
                 return Some(DetectedMeeting {
                     app_name: pattern.display_name.to_string(),
                     process_name: window.info.name.clone(),
