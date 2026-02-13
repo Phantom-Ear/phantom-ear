@@ -155,9 +155,9 @@
 {/if}
 
 <!-- Modal / Inline Container -->
-<div class="{inline ? 'flex flex-col h-full min-h-0' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
+<div class="{inline ? 'flex flex-col h-full min-h-0 overflow-hidden' : 'fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-[500px] md:max-h-[80vh] glass-strong rounded-2xl border border-phantom-ear-border shadow-glow-surface z-50 flex flex-col overflow-hidden'}">
   <!-- Header -->
-  <div class="flex items-center justify-between px-6 py-4 border-b border-phantom-ear-border/50">
+  <div class="flex items-center justify-between px-6 py-4 border-b border-phantom-ear-border/50 shrink-0">
     <div class="flex items-center gap-3">
       <div class="w-8 h-8 rounded-lg bg-gradient-accent flex items-center justify-center">
         <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -186,7 +186,7 @@
     </div>
   {:else}
     <!-- Tabs -->
-    <div class="flex border-b border-phantom-ear-border/50 px-2">
+    <div class="flex border-b border-phantom-ear-border/50 px-2 shrink-0">
       <button
         onclick={() => activeTab = "general"}
         class="relative flex-1 px-4 py-3 text-sm font-medium transition-colors {activeTab === 'general' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:text-phantom-ear-text'}"
@@ -474,7 +474,7 @@
     </div>
 
     <!-- Footer -->
-    <div class="flex justify-end gap-3 px-6 py-4 border-t border-phantom-ear-border/50">
+    <div class="flex justify-end gap-3 px-6 py-4 border-t border-phantom-ear-border/50 shrink-0">
       {#if !inline}
         <button
           onclick={onClose}

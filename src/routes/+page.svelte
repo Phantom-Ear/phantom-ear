@@ -854,6 +854,7 @@
       {pinnedMeetings}
       {recentMeetings}
       activeMeetingId={meetingsStore.activeMeetingId}
+      {isRecording}
       onToggle={() => sidebarCollapsed = !sidebarCollapsed}
       onNavigate={handleNavigate}
       onSelectMeeting={handleSelectMeeting}
@@ -862,6 +863,7 @@
       onDeleteMeeting={(id) => meetingsStore.deleteMeeting(id)}
       onSearch={handleSearch}
       onOpenSearchOverlay={() => showSearchOverlay = true}
+      onToggleRecording={toggleRecording}
     />
 
     <!-- Main Content -->

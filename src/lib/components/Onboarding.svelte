@@ -136,9 +136,7 @@
       <div class="mb-8 relative">
         <div class="w-24 h-24 rounded-3xl bg-gradient-to-br from-phantom-ear-accent/20 to-phantom-ear-purple/10 flex items-center justify-center border border-phantom-ear-border/50 shadow-glow-surface">
           {#if step.icon === "ear"}
-            <svg class="w-12 h-12 text-phantom-ear-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-            </svg>
+            <img src="/PhantomEarNoBackground.png" alt="PhantomEar" class="w-14 h-14 object-contain" />
           {:else if step.icon === "mic"}
             <svg class="w-12 h-12 text-phantom-ear-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />

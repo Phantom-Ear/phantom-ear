@@ -120,99 +120,104 @@
   }
 </script>
 
-<div class="w-full max-w-xl {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'} transition-all duration-500 ease-out">
-  <!-- Stats Cards -->
-  <div class="grid grid-cols-2 gap-4 mb-4">
+<div class="w-full max-w-lg {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'} transition-all duration-500 ease-out">
+  <!-- Stats Grid - 4 balanced cards -->
+  <div class="grid grid-cols-4 gap-3 mb-4">
     <!-- Total Meetings -->
-    <div class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-phantom-ear-surface/80 to-phantom-ear-surface/40 border border-phantom-ear-border/50 p-5 hover:border-phantom-ear-accent/30 transition-all duration-300">
-      <div class="absolute inset-0 bg-gradient-to-br from-phantom-ear-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      <div class="relative flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-phantom-ear-accent/20 to-phantom-ear-accent/5 flex items-center justify-center border border-phantom-ear-accent/20">
-          <svg class="w-6 h-6 text-phantom-ear-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-phantom-ear-accent/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-phantom-ear-accent/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-phantom-ear-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
           </svg>
         </div>
-        <div>
-          <p class="text-3xl font-bold text-phantom-ear-text tabular-nums">{totalMeetings}</p>
-          <p class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wider">Total Meetings</p>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{totalMeetings}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">Total</p>
+      </div>
+    </div>
+
+    <!-- This Week -->
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-phantom-ear-purple/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-phantom-ear-purple/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-phantom-ear-purple" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
         </div>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{meetingsThisWeek}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">This Week</p>
       </div>
     </div>
 
     <!-- Total Time -->
-    <div class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-phantom-ear-surface/80 to-phantom-ear-surface/40 border border-phantom-ear-border/50 p-5 hover:border-phantom-ear-purple/30 transition-all duration-300">
-      <div class="absolute inset-0 bg-gradient-to-br from-phantom-ear-purple/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-      <div class="relative flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-phantom-ear-purple/20 to-phantom-ear-purple/5 flex items-center justify-center border border-phantom-ear-purple/20">
-          <svg class="w-6 h-6 text-phantom-ear-purple" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-green-500/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-green-500/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10" />
             <polyline points="12 6 12 12 16 14" />
           </svg>
         </div>
-        <div>
-          <p class="text-3xl font-bold text-phantom-ear-text tabular-nums">{formatDuration(totalRecordingTime)}</p>
-          <p class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wider">Total Time</p>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{formatDuration(totalRecordingTime)}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">Total Time</p>
+      </div>
+    </div>
+
+    <!-- Avg Duration -->
+    <div class="group relative overflow-hidden rounded-xl bg-phantom-ear-surface/60 border border-phantom-ear-border/50 p-4 hover:border-yellow-500/30 transition-all duration-300">
+      <div class="flex flex-col items-center text-center">
+        <div class="w-9 h-9 rounded-lg bg-yellow-500/15 flex items-center justify-center mb-2">
+          <svg class="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
         </div>
+        <p class="text-xl font-bold text-phantom-ear-text tabular-nums">{formatDuration(averageDuration)}</p>
+        <p class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">Avg</p>
       </div>
     </div>
   </div>
 
-  <!-- Quick Stats Pills -->
-  <div class="flex flex-wrap gap-2 justify-center mb-4">
-    <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-phantom-ear-surface/60 border border-phantom-ear-border/50">
-      <span class="text-sm font-semibold text-phantom-ear-accent tabular-nums">{meetingsThisWeek}</span>
-      <span class="text-xs text-phantom-ear-text-muted">This Week</span>
-    </div>
-
-    <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-phantom-ear-surface/60 border border-phantom-ear-border/50">
-      <span class="text-sm font-semibold text-phantom-ear-text tabular-nums">{formatDuration(averageDuration)}</span>
-      <span class="text-xs text-phantom-ear-text-muted">Avg Duration</span>
-    </div>
-
-    {#if mostActiveDay}
-      <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-phantom-ear-surface/60 border border-phantom-ear-border/50">
-        <span class="text-sm font-semibold text-phantom-ear-text">{mostActiveDay}</span>
-        <span class="text-xs text-phantom-ear-text-muted">Most Active</span>
-      </div>
-    {/if}
-
-    {#if lastMeetingTime}
-      <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-phantom-ear-surface/60 border border-phantom-ear-border/50">
-        <span class="text-sm font-semibold text-phantom-ear-text tabular-nums">{formatRelativeTime(lastMeetingTime)}</span>
-        <span class="text-xs text-phantom-ear-text-muted">Last Meeting</span>
-      </div>
-    {/if}
-  </div>
-
-  <!-- Weekly Activity -->
+  <!-- Weekly Activity Chart -->
   {#if totalMeetings > 0}
-    <div class="rounded-2xl bg-phantom-ear-surface/40 border border-phantom-ear-border/50 p-5">
-      <div class="flex justify-between items-center mb-4">
-        <span class="text-sm font-medium text-phantom-ear-text">This Week</span>
-        <span class="text-xs text-phantom-ear-text-muted">{meetingsThisWeek} recording{meetingsThisWeek !== 1 ? 's' : ''}</span>
+    <div class="rounded-xl bg-phantom-ear-surface/40 border border-phantom-ear-border/50 p-4">
+      <div class="flex justify-between items-center mb-3">
+        <span class="text-xs font-medium text-phantom-ear-text">Weekly Activity</span>
+        {#if mostActiveDay}
+          <span class="text-[10px] text-phantom-ear-text-muted">Most active: <span class="text-phantom-ear-accent">{mostActiveDay}</span></span>
+        {/if}
       </div>
 
-      <div class="flex items-end justify-between gap-2 h-20">
+      <div class="flex items-end justify-between gap-2 h-16">
         {#each weeklyActivity as day, i}
-          <div class="flex-1 flex flex-col items-center gap-2">
+          <div class="flex-1 flex flex-col items-center gap-1.5">
             <div class="w-full relative">
               <div
-                class="w-full rounded-md transition-all duration-500 ease-out {day.count > 0 ? 'bg-gradient-to-t from-phantom-ear-accent to-phantom-ear-purple' : 'bg-phantom-ear-border/50'}"
-                style="height: {day.count > 0 ? Math.max(16, (day.count / maxWeeklyCount) * 64) : 4}px; animation-delay: {i * 50}ms"
+                class="w-full rounded transition-all duration-500 ease-out {day.count > 0 ? 'bg-gradient-to-t from-phantom-ear-accent to-phantom-ear-purple' : 'bg-phantom-ear-border/40'}"
+                style="height: {day.count > 0 ? Math.max(12, (day.count / maxWeeklyCount) * 48) : 3}px; animation-delay: {i * 50}ms"
               >
                 {#if day.count > 0}
-                  <span class="absolute -top-5 left-1/2 -translate-x-1/2 text-[10px] font-semibold text-phantom-ear-text tabular-nums">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-semibold text-phantom-ear-text tabular-nums">
                     {day.count}
                   </span>
                 {/if}
               </div>
             </div>
-            <span class="text-[10px] font-medium {day.isToday ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted'}">
+            <span class="text-[9px] font-medium {day.isToday ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted'}">
               {day.day}
             </span>
           </div>
         {/each}
       </div>
+    </div>
+  {/if}
+
+  <!-- Last Meeting Info -->
+  {#if lastMeetingTime}
+    <div class="mt-3 text-center">
+      <span class="text-xs text-phantom-ear-text-muted">Last recording: <span class="text-phantom-ear-text">{formatRelativeTime(lastMeetingTime)}</span></span>
     </div>
   {/if}
 </div>

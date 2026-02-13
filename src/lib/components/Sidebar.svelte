@@ -10,6 +10,7 @@
     recentMeetings = [],
     activeMeetingId = null,
     searchQuery = '',
+    isRecording = false,
     onToggle,
     onNavigate,
     onSelectMeeting,
@@ -18,6 +19,7 @@
     onDeleteMeeting,
     onSearch,
     onOpenSearchOverlay,
+    onToggleRecording,
   }: {
     collapsed?: boolean;
     currentView?: View;
@@ -25,6 +27,7 @@
     recentMeetings?: MeetingListItem[];
     activeMeetingId?: string | null;
     searchQuery?: string;
+    isRecording?: boolean;
     onToggle: () => void;
     onNavigate: (view: View) => void;
     onSelectMeeting: (id: string) => void;
@@ -33,6 +36,7 @@
     onDeleteMeeting: (id: string) => void;
     onSearch?: (query: string) => void;
     onOpenSearchOverlay?: () => void;
+    onToggleRecording?: () => void;
   } = $props();
 
   let localSearchQuery = $state(searchQuery);
@@ -119,71 +123,92 @@
   tabindex="0"
   class="flex flex-col h-full bg-phantom-ear-surface border-r border-phantom-ear-border transition-all duration-200 ease-in-out {collapsed ? 'w-16' : 'w-64'} focus:outline-none"
 >
-  <!-- Header -->
-  <div class="flex items-center gap-3 px-4 py-4 border-b border-phantom-ear-border/50">
-    <button
-      onclick={onToggle}
-      class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors text-phantom-ear-text-muted"
-      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-    >
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-      </svg>
-    </button>
+  <!-- Header: Toggle + Quick Record -->
+  <div class="px-3 pt-3 pb-2 border-b border-phantom-ear-border/50">
     {#if !collapsed}
-      <span class="font-semibold text-phantom-ear-text">PhantomEar</span>
-    {/if}
-  </div>
-
-  <!-- Navigation -->
-  <nav class="px-2 py-3 space-y-1">
-    {#each navItems as item}
+      <!-- Quick Record Button -->
       <button
-        onclick={() => onNavigate(item.view)}
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {currentView === item.view ? 'bg-phantom-ear-accent/10 text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text'}"
-        title={collapsed ? item.label : undefined}
+        onclick={() => onToggleRecording?.()}
+        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-2 transition-all {isRecording ? 'bg-phantom-ear-danger/15 border border-phantom-ear-danger/30 text-phantom-ear-danger' : 'bg-gradient-to-r from-phantom-ear-accent to-phantom-ear-purple text-white hover:opacity-90'}"
+        title={isRecording ? 'Stop recording' : 'Start recording'}
       >
-        {#if item.icon === 'home'}
-          <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+        {#if isRecording}
+          <span class="w-2 h-2 rounded-full bg-phantom-ear-danger animate-pulse"></span>
+          <span class="text-sm font-medium">Recording...</span>
+        {:else}
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="6" />
           </svg>
-        {:else if item.icon === 'ghost'}
-          <svg class="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
-          </svg>
-        {:else if item.icon === 'cog'}
-          <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-        {/if}
-        {#if !collapsed}
-          <span class="text-sm font-medium">{item.label}</span>
+          <span class="text-sm font-medium">New Recording</span>
         {/if}
       </button>
-    {/each}
-  </nav>
 
-  <!-- Search -->
-  {#if !collapsed}
-    <div class="px-3 pb-2">
+      <!-- Search -->
       <div class="relative">
         <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <input
           type="text"
-          placeholder="Search meetings..."
+          placeholder="Search..."
           value={localSearchQuery}
           oninput={handleSearchInput}
           onclick={() => onOpenSearchOverlay?.()}
           readonly
-          class="w-full pl-8 pr-3 py-1.5 text-xs bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors cursor-pointer"
+          class="w-full pl-8 pr-8 py-2 text-xs bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors cursor-pointer"
         />
         <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-phantom-ear-text-muted bg-phantom-ear-surface-hover px-1.5 py-0.5 rounded">⌘K</span>
       </div>
+    {:else}
+      <!-- Collapsed: Quick Record Button -->
+      <div class="flex flex-col items-center">
+        <button
+          onclick={() => onToggleRecording?.()}
+          class="p-2.5 rounded-xl transition-all {isRecording ? 'bg-phantom-ear-danger/15 text-phantom-ear-danger' : 'bg-gradient-to-r from-phantom-ear-accent to-phantom-ear-purple text-white hover:opacity-90'}"
+          title={isRecording ? 'Stop recording' : 'Start recording'}
+        >
+          {#if isRecording}
+            <span class="block w-4 h-4 rounded-full bg-phantom-ear-danger animate-pulse"></span>
+          {:else}
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="6" />
+            </svg>
+          {/if}
+        </button>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Navigation - Vertical Column -->
+  <nav class="px-2 py-2">
+    <div class="flex flex-col gap-0.5">
+      {#each navItems as item}
+        <button
+          onclick={() => onNavigate(item.view)}
+          class="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {currentView === item.view ? 'bg-phantom-ear-accent/10 text-phantom-ear-accent' : 'text-phantom-ear-text-muted hover:bg-phantom-ear-surface-hover hover:text-phantom-ear-text'}"
+          title={collapsed ? item.label : undefined}
+        >
+          {#if item.icon === 'home'}
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+          {:else if item.icon === 'ghost'}
+            <svg class="w-5 h-5 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2C7.58 2 4 5.58 4 10v9c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1v-1c0-.55.45-1 1-1s1 .45 1 1v1c0 .55.45 1 1 1s1-.45 1-1V10c0-4.42-3.58-8-8-8zm-2 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm4 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
+            </svg>
+          {:else if item.icon === 'cog'}
+            <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          {/if}
+          {#if !collapsed}
+            <span class="text-sm font-medium">{item.label}</span>
+          {/if}
+        </button>
+      {/each}
     </div>
-  {/if}
+  </nav>
 
   <!-- Meetings List -->
   <div class="flex-1 overflow-y-auto px-2 py-2">
