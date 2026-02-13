@@ -86,6 +86,8 @@ pub fn run() {
             commands::is_meeting_detection_running,
             commands::dismiss_meeting_notification,
             commands::check_meeting_running,
+            commands::check_screen_recording_permission,
+            commands::open_screen_recording_settings,
         ])
         .setup(|app| {
             // Get app data directory and create DB synchronously

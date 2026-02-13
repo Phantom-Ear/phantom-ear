@@ -58,6 +58,11 @@
   let importSuccess = $state("");
   let activeTab = $state<"general" | "llm">("general");
 
+  // Permission state for meeting detection
+  let isMacOS = $state(false);
+  let hasScreenRecordingPermission = $state<boolean | null>(null);
+  let isCheckingPermission = $state(false);
+
   const languages = [
     { code: "auto", name: "Auto-detect" },
     { code: "en", name: "English" },
@@ -87,10 +92,41 @@
       models = loadedModels;
       asrBackends = loadedBackends;
       audioDevices = loadedDevices;
+
+      // Check platform using navigator (works in Tauri webview)
+      isMacOS = navigator.platform.toLowerCase().includes("mac");
+
+      // Check screen recording permission on macOS
+      if (isMacOS) {
+        await checkPermission();
+      }
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
     isLoading = false;
+  }
+
+  async function checkPermission() {
+    isCheckingPermission = true;
+    try {
+      hasScreenRecordingPermission = await invoke<boolean>("check_screen_recording_permission");
+    } catch (e) {
+      console.error("Failed to check permission:", e);
+      hasScreenRecordingPermission = false;
+    }
+    isCheckingPermission = false;
+  }
+
+  async function openScreenRecordingSettings() {
+    try {
+      await invoke("open_screen_recording_settings");
+      // Re-check permission after a delay (user may grant it)
+      setTimeout(async () => {
+        await checkPermission();
+      }, 2000);
+    } catch (e) {
+      console.error("Failed to open settings:", e);
+    }
   }
 
   async function saveSettings() {
@@ -253,6 +289,64 @@
             <div class="w-10 h-5 bg-phantom-ear-surface border border-phantom-ear-border rounded-full peer peer-checked:bg-green-500 peer-checked:border-green-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-phantom-ear-text-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5 peer-checked:after:bg-white"></div>
           </label>
         </div>
+
+        <!-- macOS Screen Recording Permission Notice -->
+        {#if settings.auto_detect_meetings && isMacOS}
+          <div class="p-3 rounded-xl border {hasScreenRecordingPermission === false ? 'bg-amber-500/10 border-amber-500/30' : hasScreenRecordingPermission === true ? 'bg-green-500/10 border-green-500/30' : 'bg-phantom-ear-surface/50 border-phantom-ear-border/50'}">
+            <div class="flex items-start gap-3">
+              {#if hasScreenRecordingPermission === null || isCheckingPermission}
+                <!-- Checking -->
+                <div class="w-8 h-8 rounded-lg bg-phantom-ear-surface flex items-center justify-center shrink-0">
+                  <svg class="w-4 h-4 text-phantom-ear-text-muted animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                  </svg>
+                </div>
+                <div class="flex-1">
+                  <span class="block text-sm font-medium text-phantom-ear-text">Checking permission...</span>
+                </div>
+              {:else if hasScreenRecordingPermission === false}
+                <!-- Permission not granted -->
+                <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
+                  <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <span class="block text-sm font-medium text-amber-400">Screen Recording Permission Required</span>
+                  <p class="text-xs text-phantom-ear-text-muted mt-1">
+                    PhantomEar needs Screen Recording permission to detect active meetings by reading window titles. Without it, detection won't work.
+                  </p>
+                  <div class="flex items-center gap-2 mt-2">
+                    <button
+                      onclick={openScreenRecordingSettings}
+                      class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+                    >
+                      Open Settings
+                    </button>
+                    <button
+                      onclick={checkPermission}
+                      class="px-3 py-1.5 rounded-lg text-xs font-medium border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text transition-colors"
+                    >
+                      Recheck
+                    </button>
+                  </div>
+                </div>
+              {:else}
+                <!-- Permission granted -->
+                <div class="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center shrink-0">
+                  <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div class="flex-1">
+                  <span class="block text-sm font-medium text-green-400">Screen Recording Enabled</span>
+                  <span class="block text-xs text-phantom-ear-text-muted mt-0.5">Meeting detection is ready to work</span>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
 
         <!-- Speech Recognition Section -->
         <div class="space-y-3">

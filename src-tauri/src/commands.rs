@@ -1835,3 +1835,70 @@ pub async fn check_meeting_running(
     let mut detector = state.meeting_detector.lock().await;
     Ok(detector.is_meeting_running().map(|d| d.app_name))
 }
+
+/// Check if Screen Recording permission is granted (macOS only)
+/// Returns true if we can read window titles, false otherwise
+#[tauri::command]
+pub async fn check_screen_recording_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use active_win_pos_rs::get_active_window;
+
+        // Try to get the active window - if permission is denied, title will be empty
+        match get_active_window() {
+            Ok(window) => {
+                // If we got a window but title is empty, permission is likely denied
+                // (unless the window genuinely has no title, which is rare)
+                let has_permission = !window.title.is_empty() || !window.app_name.is_empty();
+                log::info!("Screen Recording permission check: {} (title: '{}', app: '{}')",
+                    has_permission, window.title, window.app_name);
+                Ok(has_permission)
+            }
+            Err(e) => {
+                log::warn!("Failed to get active window (permission denied?): {:?}", e);
+                Ok(false)
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On Windows/Linux, no special permission needed
+        Ok(true)
+    }
+}
+
+/// Open Screen Recording settings (macOS) or return info for other platforms
+#[tauri::command]
+pub async fn open_screen_recording_settings() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        // Open System Preferences > Privacy & Security > Screen Recording
+        let result = Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .spawn();
+
+        match result {
+            Ok(_) => {
+                log::info!("Opened Screen Recording settings");
+                Ok("opened".to_string())
+            }
+            Err(e) => {
+                log::error!("Failed to open Screen Recording settings: {}", e);
+                Err(format!("Failed to open settings: {}", e))
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Ok("not_required".to_string())
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Ok("not_required".to_string())
+    }
+}
