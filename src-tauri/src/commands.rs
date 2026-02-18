@@ -631,6 +631,16 @@ pub async fn rename_meeting(
 }
 
 #[tauri::command]
+pub async fn update_meeting_tags(
+    id: String,
+    tags: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.update_meeting_tags(&id, tags.as_deref())
+        .map_err(|e| format!("DB error: {}", e))
+}
+
+#[tauri::command]
 pub async fn toggle_pin_meeting(
     id: String,
     state: State<'_, AppState>,
@@ -686,6 +696,19 @@ pub async fn export_meeting(
             }
             Ok(md)
         }
+        "srt" => {
+            // SRT subtitle format
+            let mut srt = String::new();
+            for (i, seg) in segments.iter().enumerate() {
+                // Convert timestamp_ms to SRT format (HH:MM:SS,mmm)
+                let start_time = format_srt_timestamp(seg.timestamp_ms);
+                let end_time = format_srt_timestamp(seg.timestamp_ms + 5000); // Assume 5s duration
+                srt.push_str(&format!("{}\n", i + 1));
+                srt.push_str(&format!("{} --> {}\n", start_time, end_time));
+                srt.push_str(&format!("{}\n\n", seg.text));
+            }
+            Ok(srt)
+        }
         _ => {
             // Default: plain text
             let mut txt = format!("{}\n{}\n\n", meeting.title, meeting.created_at);
@@ -694,6 +717,72 @@ pub async fn export_meeting(
             }
             Ok(txt)
         }
+    }
+}
+
+/// Format milliseconds to SRT timestamp format (HH:MM:SS,mmm)
+fn format_srt_timestamp(ms: i64) -> String {
+    let total_secs = ms / 1000;
+    let hours = total_secs / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+    let millis = ms % 1000;
+    format!("{:02}:{:02}:{:02},{:03}", hours, mins, secs, millis)
+}
+
+/// Export meeting to a file with Save As dialog
+#[tauri::command]
+pub async fn export_meeting_to_file(
+    app: AppHandle,
+    id: String,
+    format: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    // First get the content (clone values to avoid borrow issues)
+    let content = export_meeting(id.clone(), format.clone(), State::clone(&state)).await?;
+
+    // Determine file extension and filter
+    let (extension, filter_name) = match format.as_str() {
+        "markdown" => ("md", "Markdown"),
+        "srt" => ("srt", "Subtitles"),
+        _ => ("txt", "Text"),
+    };
+
+    // Get meeting title for default filename
+    let meeting = state.db.get_meeting(&id)
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Meeting not found".to_string())?;
+
+    // Sanitize filename
+    let safe_title = meeting.title
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '_')
+        .collect::<String>()
+        .trim()
+        .replace(' ', "_");
+    let default_name = if safe_title.is_empty() {
+        format!("meeting_{}", chrono::Utc::now().format("%Y%m%d"))
+    } else {
+        safe_title
+    };
+
+    // Use Tauri dialog to show Save As
+    use tauri_plugin_dialog::DialogExt;
+    let file_path = app.dialog()
+        .file()
+        .set_file_name(&format!("{}.{}", default_name, extension))
+        .add_filter(filter_name, &[extension])
+        .blocking_save_file();
+
+    if let Some(path) = file_path {
+        // Write the file
+        std::fs::write(path.as_path().unwrap(), content)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+        log::info!("Exported meeting to: {:?}", path);
+        Ok(true)
+    } else {
+        // User cancelled
+        Ok(false)
     }
 }
 
@@ -1196,6 +1285,66 @@ pub async fn generate_summary(
         action_items,
         key_points,
     })
+}
+
+/// Generate meeting title using LLM
+#[tauri::command]
+pub async fn generate_title(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    // Get transcript segments (first few for context)
+    let segments = state.db.get_segments(&meeting_id)
+        .map_err(|e| format!("DB error: {}", e))?;
+    
+    if segments.is_empty() {
+        return Err("No transcript available for this meeting".to_string());
+    }
+    
+    // Use first 10 segments for title generation (to get context without too much text)
+    let context_segments: Vec<_> = segments.iter().take(10).collect();
+    let transcript_text: String = context_segments.iter()
+        .map(|s| s.text.clone())
+        .collect::<Vec<_>>()
+        .join(" ");
+    
+    // Get settings and create LLM client
+    let settings = state.settings.lock().await;
+    let provider = match settings.llm_provider.as_str() {
+        "openai" => {
+            let api_key = settings.openai_api_key.clone()
+                .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
+            if api_key.is_empty() {
+                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+            }
+            LlmProvider::OpenAI { api_key }
+        }
+        "ollama" | _ => {
+            let url = settings.ollama_url.clone()
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model = settings.ollama_model.clone()
+                .unwrap_or_else(|| "llama3.2".to_string());
+            LlmProvider::Ollama { url, model }
+        }
+    };
+    drop(settings);
+
+    let client = LlmClient::new(provider);
+    log::info!("Generating meeting title for {}", meeting_id);
+
+    let title = client.generate_title(&transcript_text)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))?;
+    
+    // Clean up the title (remove quotes if present)
+    let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
+    
+    // Update the meeting title in the database
+    state.db.update_meeting_title(&meeting_id, &title)
+        .map_err(|e| format!("Failed to update title: {}", e))?;
+    
+    log::info!("Generated title: {}", title);
+    Ok(title)
 }
 
 // ============================================================================

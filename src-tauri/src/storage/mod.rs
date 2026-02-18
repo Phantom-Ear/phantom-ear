@@ -29,6 +29,7 @@ pub struct MeetingRow {
     pub pinned: bool,
     pub duration_ms: i64,
     pub summary: Option<String>,
+    pub tags: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,6 +40,7 @@ pub struct MeetingListItem {
     pub pinned: bool,
     pub segment_count: i64,
     pub duration_ms: i64,
+    pub tags: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -175,6 +177,19 @@ impl Database {
             log::info!("Added speaker_id column to transcript_segments table");
         }
 
+        // Migration: add tags column to meetings if it doesn't exist
+        let has_tags: bool = {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='tags'"
+            )?;
+            let count: i64 = stmt.query_row([], |row| row.get(0))?;
+            count > 0
+        };
+        if !has_tags {
+            conn.execute_batch("ALTER TABLE meetings ADD COLUMN tags TEXT;")?;
+            log::info!("Added tags column to meetings table");
+        }
+
         // Create speakers table if it doesn't exist
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS speakers (
@@ -204,7 +219,7 @@ impl Database {
     pub fn get_meeting(&self, id: &str) -> Result<Option<MeetingRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, ended_at, pinned, duration_ms, summary FROM meetings WHERE id = ?1",
+            "SELECT id, title, created_at, ended_at, pinned, duration_ms, summary, tags FROM meetings WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], |row| {
             Ok(MeetingRow {
@@ -215,6 +230,7 @@ impl Database {
                 pinned: row.get::<_, i32>(4)? != 0,
                 duration_ms: row.get(5)?,
                 summary: row.get(6)?,
+                tags: row.get(7)?,
             })
         })?;
         match rows.next() {
@@ -227,7 +243,7 @@ impl Database {
     pub fn list_meetings(&self) -> Result<Vec<MeetingListItem>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT m.id, m.title, m.created_at, m.pinned, m.duration_ms,
+            "SELECT m.id, m.title, m.created_at, m.pinned, m.duration_ms, m.tags,
                     (SELECT COUNT(*) FROM transcript_segments WHERE meeting_id = m.id) as seg_count
              FROM meetings m
              ORDER BY m.pinned DESC, m.created_at DESC",
@@ -240,7 +256,8 @@ impl Database {
                     created_at: row.get(2)?,
                     pinned: row.get::<_, i32>(3)? != 0,
                     duration_ms: row.get(4)?,
-                    segment_count: row.get(5)?,
+                    tags: row.get(5)?,
+                    segment_count: row.get(6)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -252,6 +269,15 @@ impl Database {
         conn.execute(
             "UPDATE meetings SET title = ?1 WHERE id = ?2",
             params![title, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_meeting_tags(&self, id: &str, tags: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE meetings SET tags = ?1 WHERE id = ?2",
+            params![tags, id],
         )?;
         Ok(())
     }

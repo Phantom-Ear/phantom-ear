@@ -24,6 +24,7 @@ export interface MeetingListItem {
   segment_count: number;
   duration_ms: number;
   first_segment_text?: string;
+  tags?: string | null;
 }
 
 export interface MeetingWithTranscript {

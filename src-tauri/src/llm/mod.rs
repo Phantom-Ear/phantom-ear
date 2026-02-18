@@ -167,4 +167,13 @@ impl LlmClient {
         let user = format!("Context:\n{}\n\nQuestion: {}", context, question);
         self.complete(system, &user).await
     }
+
+    /// Generate a meeting title from transcript
+    pub async fn generate_title(&self, transcript: &str) -> Result<String> {
+        let system = "You are a helpful assistant that creates short, descriptive titles for meeting transcripts. \
+                      Create a concise title (3-6 words) that captures the main topic or purpose of the meeting. \
+                      Just return the title, nothing else.";
+        let user = format!("Based on this transcript, create a short title:\n\n{}", transcript);
+        self.complete(system, &user).await
+    }
 }

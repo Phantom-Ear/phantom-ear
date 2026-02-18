@@ -1,6 +1,17 @@
 <script lang="ts">
   import type { MeetingListItem } from '$lib/types';
 
+  // Predefined tag options
+  const TAG_OPTIONS = [
+    { value: 'standup', label: 'Standup', emoji: '📅' },
+    { value: '1:1', label: '1:1', emoji: '👥' },
+    { value: 'interview', label: 'Interview', emoji: '🎯' },
+    { value: 'client', label: 'Client Call', emoji: '🤝' },
+    { value: 'team', label: 'Team Meeting', emoji: '👨‍👩‍👧‍👦' },
+    { value: 'training', label: 'Training', emoji: '📚' },
+    { value: 'brainstorm', label: 'Brainstorm', emoji: '💡' },
+  ];
+
   let {
     meeting,
     isActive = false,
@@ -10,6 +21,7 @@
     onRename,
     onTogglePin,
     onDelete,
+    onUpdateTags,
   }: {
     meeting: MeetingListItem;
     isActive?: boolean;
@@ -19,11 +31,13 @@
     onRename: (newTitle: string) => void;
     onTogglePin: () => void;
     onDelete: () => void;
+    onUpdateTags?: (tags: string | null) => void;
   } = $props();
 
   let isEditing = $state(false);
   let editTitle = $state(meeting.title);
   let showMenu = $state(false);
+  let showTagMenu = $state(false);
   let inputEl: HTMLInputElement | null = null;
 
   function startEditing() {
@@ -49,6 +63,29 @@
     } else if (e.key === 'Escape') {
       isEditing = false;
     }
+  }
+
+  // Get current tags as array
+  function getCurrentTags(): string[] {
+    if (!meeting.tags) return [];
+    return meeting.tags.split(',').filter(t => t.trim());
+  }
+
+  function getTagLabel(tagValue: string): string {
+    const tag = TAG_OPTIONS.find(t => t.value === tagValue);
+    return tag ? `${tag.emoji} ${tag.label}` : tagValue;
+  }
+
+  function toggleTag(tagValue: string) {
+    if (!onUpdateTags) return;
+    const current = getCurrentTags();
+    let newTags: string[];
+    if (current.includes(tagValue)) {
+      newTags = current.filter(t => t !== tagValue);
+    } else {
+      newTags = [...current, tagValue];
+    }
+    onUpdateTags(newTags.length > 0 ? newTags.join(',') : null);
   }
 </script>
 
@@ -89,6 +126,13 @@
         </div>
         {#if meeting.segment_count > 0}
           <span class="text-xs text-phantom-ear-text-muted">{meeting.segment_count} segments</span>
+        {/if}
+        {#if meeting.tags}
+          <div class="flex flex-wrap gap-1 mt-1">
+            {#each getCurrentTags() as tag}
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-phantom-ear-purple/20 text-phantom-ear-purple">{getTagLabel(tag)}</span>
+            {/each}
+          </div>
         {/if}
       {/if}
     </div>
@@ -132,6 +176,32 @@
               </svg>
               {meeting.pinned ? 'Unpin' : 'Pin'}
             </button>
+            <button
+              onclick={() => { showTagMenu = !showTagMenu; }}
+              class="w-full px-3 py-1.5 text-left text-sm text-phantom-ear-text hover:bg-phantom-ear-surface-hover flex items-center gap-2"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+              Tags
+            </button>
+            {#if showTagMenu}
+              <div class="pl-4 pr-2 py-1 bg-phantom-ear-bg border border-phantom-ear-border rounded-lg mx-2 mt-1 mb-1">
+                {#each TAG_OPTIONS as tag}
+                  <button
+                    onclick={() => toggleTag(tag.value)}
+                    class="w-full px-2 py-1 text-left text-xs hover:bg-phantom-ear-surface-hover rounded flex items-center justify-between {getCurrentTags().includes(tag.value) ? 'text-phantom-ear-accent' : 'text-phantom-ear-text-muted'}"
+                  >
+                    <span>{tag.emoji} {tag.label}</span>
+                    {#if getCurrentTags().includes(tag.value)}
+                      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                      </svg>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
             <hr class="my-1 border-phantom-ear-border" />
             <button
               onclick={() => { onDelete(); showMenu = false; }}

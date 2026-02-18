@@ -20,6 +20,7 @@
     onSearch,
     onOpenSearchOverlay,
     onToggleRecording,
+    onUpdateMeetingTags,
   }: {
     collapsed?: boolean;
     currentView?: View;
@@ -37,6 +38,7 @@
     onSearch?: (query: string) => void;
     onOpenSearchOverlay?: () => void;
     onToggleRecording?: () => void;
+    onUpdateMeetingTags?: (id: string, tags: string | null) => void;
   } = $props();
 
   let localSearchQuery = $state(searchQuery);
@@ -230,6 +232,7 @@
               onRename={(title) => { selectedIndex = -1; onRenameMeeting(meeting.id, title); }}
               onTogglePin={() => { selectedIndex = -1; onTogglePinMeeting(meeting.id); }}
               onDelete={() => { selectedIndex = -1; onDeleteMeeting(meeting.id); }}
+              onUpdateTags={(tags) => onUpdateMeetingTags?.(meeting.id, tags)}
             />
           {/each}
         </div>
@@ -252,6 +255,7 @@
               onRename={(title) => { selectedIndex = -1; onRenameMeeting(meeting.id, title); }}
               onTogglePin={() => { selectedIndex = -1; onTogglePinMeeting(meeting.id); }}
               onDelete={() => { selectedIndex = -1; onDeleteMeeting(meeting.id); }}
+              onUpdateTags={(tags) => onUpdateMeetingTags?.(meeting.id, tags)}
             />
           {/each}
         </div>
