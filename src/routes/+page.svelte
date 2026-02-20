@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
+  import { marked } from "marked";
   import Setup from "$lib/components/Setup.svelte";
   import Settings from "$lib/components/Settings.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -16,6 +17,16 @@
   import { meetingsStore } from "$lib/stores/meetings.svelte";
   import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
   import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker } from "$lib/types";
+
+  // Markdown rendering helper
+  function renderMarkdown(text: string): string {
+    if (!text) return '';
+    try {
+      return marked.parse(text, { async: false }) as string;
+    } catch {
+      return text;
+    }
+  }
 
   interface DownloadProgress {
     model_name: string;
@@ -69,6 +80,12 @@
   let phomyReferences = $state<SemanticSearchResult[]>([]);
   let phomyContextLimit = $state(10);
   let phomyHistory = $state<Array<{ role: 'user' | 'assistant'; text: string; refs?: SemanticSearchResult[] }>>([]);
+  
+  // Track expanded references (by message index)
+  let expandedRefs = $state<Set<number>>(new Set());
+  
+  // Chat container reference for auto-scroll
+  let phomyChatContainer: HTMLDivElement | null = null;
 
   // Embedding state
   let embeddingModelLoaded = $state(false);
@@ -662,16 +679,39 @@
       const refs = await meetingsStore.semanticSearch(q, undefined, 10);
       phomyReferences = refs;
 
-      // Use Phomy intelligent routing
-      const ans = await invoke<string>("phomy_ask", { question: q });
+      // Use Phomy with web search enabled
+      const ans = await invoke<string>("phomy_ask_with_search", { question: q, use_web_search: true });
       phomyAnswer = ans;
       phomyHistory = [...phomyHistory, { role: 'assistant', text: ans, refs }];
+      
+      // Auto-scroll to bottom
+      setTimeout(() => {
+        if (phomyChatContainer) {
+          phomyChatContainer.scrollTop = phomyChatContainer.scrollHeight;
+        }
+      }, 50);
     } catch (e) {
       const errMsg = `Error: ${e}`;
       phomyAnswer = errMsg;
       phomyHistory = [...phomyHistory, { role: 'assistant', text: errMsg }];
+      
+      // Auto-scroll to bottom on error too
+      setTimeout(() => {
+        if (phomyChatContainer) {
+          phomyChatContainer.scrollTop = phomyChatContainer.scrollHeight;
+        }
+      }, 50);
     }
     phomyIsAsking = false;
+  }
+
+  function toggleRefs(index: number) {
+    if (expandedRefs.has(index)) {
+      expandedRefs.delete(index);
+    } else {
+      expandedRefs.add(index);
+    }
+    expandedRefs = new Set(expandedRefs);
   }
 
   async function expandPhomyContext() {
@@ -687,7 +727,7 @@
       const refs = await meetingsStore.semanticSearch(lastUserMsg.text, undefined, newLimit);
       phomyReferences = refs;
 
-      const ans = await invoke<string>("phomy_ask", { question: lastUserMsg.text });
+      const ans = await invoke<string>("phomy_ask_with_search", { question: lastUserMsg.text, use_web_search: true });
       phomyAnswer = ans;
       phomyHistory = [
         ...phomyHistory.slice(0, -1),
@@ -1386,7 +1426,7 @@
             </div>
 
             <!-- Chat History -->
-            <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-y-auto p-4 space-y-4">
+            <div bind:this={phomyChatContainer} class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-y-auto p-4 space-y-4">
               {#if phomyHistory.length === 0}
                 <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
                   <div class="w-14 h-14 mb-4 rounded-2xl bg-phantom-ear-purple/10 flex items-center justify-center">
@@ -1407,15 +1447,29 @@
                     </div>
                   {:else}
                     <div class="space-y-3">
-                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-phantom-ear-surface border border-phantom-ear-border text-sm text-phantom-ear-text whitespace-pre-wrap">
-                        {msg.text}
+                      <!-- Use @html to render markdown -->
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-phantom-ear-surface border border-phantom-ear-border text-sm text-phantom-ear-text prose prose-invert prose-sm max-w-none">
+                        {@html renderMarkdown(msg.text)}
                       </div>
                       {#if msg.refs && msg.refs.length > 0}
-                        <div class="space-y-2 max-w-[80%]">
-                          <p class="text-xs text-phantom-ear-text-muted uppercase tracking-wide font-medium">References</p>
-                          {#each msg.refs.slice(0, 5) as ref}
-                            <ReferenceCard result={ref} onSelect={handleSelectMeeting} />
-                          {/each}
+                        {@const msgIndex = phomyHistory.indexOf(msg)}
+                        <div class="max-w-[80%]">
+                          <button
+                            onclick={() => toggleRefs(msgIndex)}
+                            class="flex items-center gap-2 text-xs text-phantom-ear-text-muted hover:text-phantom-ear-purple transition-colors"
+                          >
+                            <svg class="w-3 h-3 transition-transform {expandedRefs.has(msgIndex) ? 'rotate-90' : ''}" fill="currentColor" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                            </svg>
+                            {expandedRefs.has(msgIndex) ? 'Hide' : 'Show'} References ({msg.refs.length})
+                          </button>
+                          {#if expandedRefs.has(msgIndex)}
+                            <div class="mt-2 space-y-2">
+                              {#each msg.refs.slice(0, 5) as ref}
+                                <ReferenceCard result={ref} onSelect={handleSelectMeeting} />
+                              {/each}
+                            </div>
+                          {/if}
                         </div>
                       {/if}
                     </div>
