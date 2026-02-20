@@ -11,6 +11,7 @@ pub mod models;
 pub mod specs;
 pub mod storage;
 pub mod transcription;
+pub mod websearch;
 
 use commands::{AppState, Settings};
 use detection::MeetingDetector;
@@ -74,6 +75,7 @@ pub fn run() {
             commands::delete_speaker,
             // Phomy assistant
             commands::phomy_ask,
+            commands::phomy_ask_with_search,
             // Embedding commands
             commands::download_embedding_model_cmd,
             commands::load_embedding_model,
@@ -84,6 +86,12 @@ pub fn run() {
             commands::get_embedding_model_download_urls,
             commands::import_embedding_model,
             commands::get_audio_level,
+            // AI features
+            commands::get_meeting_stats,
+            commands::extract_meeting_metadata,
+            commands::enhance_transcript_segment,
+            commands::detect_and_answer_question,
+            commands::web_search,
             // Meeting detection commands
             commands::start_meeting_detection,
             commands::stop_meeting_detection,

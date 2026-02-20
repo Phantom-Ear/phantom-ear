@@ -57,6 +57,10 @@ env_logger = "0.11"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
 
+# Web search
+regex = "1"
+urlencoding = "2"
+
 # Channel communication
 crossbeam-channel = "0.5"
 

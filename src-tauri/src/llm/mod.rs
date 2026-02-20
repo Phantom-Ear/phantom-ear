@@ -176,4 +176,66 @@ impl LlmClient {
         let user = format!("Based on this transcript, create a short title:\n\n{}", transcript);
         self.complete(system, &user).await
     }
+
+    /// Enhance a transcript segment with context from surrounding segments
+    pub async fn enhance_segment(&self, prev_text: Option<&str>, current_text: &str, next_text: Option<&str>) -> Result<String> {
+        let mut context = String::new();
+        if let Some(prev) = prev_text {
+            context.push_str(&format!("Previous segment: {}\n", prev));
+        }
+        context.push_str(&format!("Current segment: {}\n", current_text));
+        if let Some(next) = next_text {
+            context.push_str(&format!("Next segment: {}", next));
+        }
+
+        let system = "You are a transcription enhancer. Improve the clarity of the current transcript segment. \
+                      Fix any misheard words, add proper punctuation, and make it more readable. \
+                      Return ONLY the enhanced text, nothing else.";
+        let user = format!("Enhance this transcript segment:\n\n{}", context);
+        self.complete(system, &user).await
+    }
+
+    /// Detect if text contains a question
+    pub async fn detect_question(&self, text: &str) -> Result<bool> {
+        let system = "You are a helpful assistant. Determine if the given text contains a question being asked. \
+                      A question is a sentence that asks for information, clarification, or an answer. \
+                      Return ONLY 'YES' if it contains a question, or 'NO' if it does not.";
+        let user = format!("Does this contain a question?\n\n{}", text);
+        let result = self.complete(system, &user).await?;
+        Ok(result.trim().to_uppercase().starts_with("YES"))
+    }
+
+    /// Extract metadata from a meeting transcript
+    pub async fn extract_metadata(&self, transcript: &str) -> Result<MeetingMetadata> {
+        let system = "You are a helpful assistant that analyzes meeting transcripts. \
+                      Extract structured metadata and return it as JSON. \
+                      Return ONLY valid JSON with no additional text.";
+        
+        let json_example = r#"{"topics": ["topic1"], "action_items": [], "decisions": [], "participant_count_estimate": 3}"#;
+        let user = format!(
+            "Analyze this meeting transcript and extract metadata as JSON with this structure: {}\nTranscript:\n{}",
+            json_example,
+            transcript
+        );
+        
+        let result = self.complete(system, &user).await?;
+        
+        // Parse JSON from result
+        let json_str = result.trim();
+        // Handle potential markdown code blocks
+        let json_str = json_str.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```");
+        
+        serde_json::from_str(json_str)
+            .map_err(|e| anyhow!("Failed to parse metadata JSON: {} - raw: {}", e, json_str))
+    }
+}
+
+/// Metadata extracted from a meeting
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MeetingMetadata {
+    pub topics: Vec<String>,
+    pub action_items: Vec<String>,
+    pub decisions: Vec<String>,
+    #[serde(rename = "participant_count_estimate")]
+    pub participant_count_estimate: i32,
 }

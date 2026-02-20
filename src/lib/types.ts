@@ -58,6 +58,8 @@ export interface Settings {
   language: string;
   asr_backend: string;
   audio_device: string | null;
+  enhance_transcripts: boolean;
+  detect_questions: boolean;
 }
 
 export interface AudioDeviceInfo {

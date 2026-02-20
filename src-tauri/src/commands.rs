@@ -48,6 +48,11 @@ pub struct Settings {
     pub asr_backend: String,
     #[serde(default)]
     pub audio_device: Option<String>,
+    // AI Features
+    #[serde(default)]
+    pub enhance_transcripts: bool,
+    #[serde(default)]
+    pub detect_questions: bool,
 }
 
 fn default_true() -> bool {
@@ -72,6 +77,9 @@ impl Default for Settings {
             language: "en".to_string(),
             asr_backend: "whisper".to_string(),
             audio_device: None,
+            // AI Features (default off)
+            enhance_transcripts: false,
+            detect_questions: false,
         }
     }
 }
@@ -227,6 +235,7 @@ pub async fn start_recording(
     let mid = meeting_id.clone();
     let meeting_title = title.clone();
     let app_clone = app.clone();
+    let settings_arc = state.settings.clone(); // Clone settings
 
     tauri::async_runtime::spawn(async move {
         run_transcription_loop_with_storage(
@@ -241,6 +250,7 @@ pub async fn start_recording(
             mid,
             emb_model_arc,
             meeting_title,
+            settings_arc,
         ).await;
     });
 
@@ -261,6 +271,7 @@ async fn run_transcription_loop_with_storage(
     meeting_id: String,
     embedding_model: Arc<Mutex<Option<EmbeddingModel>>>,
     meeting_title: String,
+    settings: Arc<Mutex<Settings>>, // Added settings parameter
 ) {
     use crate::asr::resample_to_16khz;
     use crate::transcription::TranscriptionEvent;
@@ -383,6 +394,9 @@ async fn run_transcription_loop_with_storage(
                                     text: text.to_string(),
                                     timestamp_ms: total_duration_ms,
                                     speaker_id: None,
+                                    enhanced_text: None,
+                                    is_question: false,
+                                    question_answer: None,
                                 }) {
                                     log::error!("Failed to persist segment: {}", e);
                                 }
@@ -411,6 +425,107 @@ async fn run_transcription_loop_with_storage(
                                         }
                                     });
                                 }
+
+                                // AI Processing: Auto-title, enhancement, question detection
+                                let current_seg_counter = segment_counter;
+                                let settings_for_ai = settings.clone();
+                                let db_for_ai = db.clone();
+                                let mid_for_ai = meeting_id.clone();
+                                let app_for_ai = app.clone();
+                                let transcript_for_ai = transcript.clone();
+                                tokio::spawn(async move {
+                                    let settings = settings_for_ai.lock().await;
+                                    let enhance_transcripts = settings.enhance_transcripts;
+                                    let detect_questions = settings.detect_questions;
+                                    drop(settings);
+
+                                    // Build LLM client
+                                    let llm_provider = {
+                                        let settings = settings_for_ai.lock().await;
+                                        match settings.llm_provider.as_str() {
+                                            "openai" => {
+                                                if let Some(key) = settings.openai_api_key.clone() {
+                                                    Some(LlmProvider::OpenAI { api_key: key })
+                                                } else { None }
+                                            }
+                                            _ => {
+                                                let url = settings.ollama_url.clone().unwrap_or_else(|| "http://localhost:11434".to_string());
+                                                let model = settings.ollama_model.clone().unwrap_or_else(|| "llama3.2".to_string());
+                                                Some(LlmProvider::Ollama { url, model })
+                                            }
+                                        }
+                                    };
+
+                                    if let Some(provider) = llm_provider {
+                                        let client = LlmClient::new(provider);
+
+                                        // Auto-title after 10 segments
+                                        if current_seg_counter >= 10 {
+                                            let transcript = transcript_for_ai.lock().await;
+                                            let title_transcript: String = transcript.iter().take(10).map(|s| s.text.clone()).collect::<Vec<_>>().join(" ");
+                                            drop(transcript);
+
+                                            if let Ok(title) = client.generate_title(&title_transcript).await {
+                                                let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
+                                                if !title.is_empty() {
+                                                    if let Err(e) = db_for_ai.update_meeting_title(&mid_for_ai, &title) {
+                                                        log::error!("Failed to auto-update meeting title: {}", e);
+                                                    } else {
+                                                        log::info!("Auto-title saved: {}", title);
+                                                        let _ = app_for_ai.emit("meeting-title-updated", &title);
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Transcript enhancement
+                                        if enhance_transcripts {
+                                            let transcript = transcript_for_ai.lock().await;
+                                            let idx = (current_seg_counter as usize).saturating_sub(1);
+                                            let prev_text = if idx > 0 { transcript.get(idx - 1).map(|s| s.text.clone()) } else { None };
+                                            let curr_text = transcript.get(idx).map(|s| s.text.clone()).unwrap_or_default();
+                                            let next_text = transcript.get(idx + 1).map(|s| s.text.clone());
+                                            drop(transcript);
+
+                                            if let Ok(enhanced) = client.enhance_segment(prev_text.as_deref(), &curr_text, next_text.as_deref()).await {
+                                                let _ = db_for_ai.update_segment_enhanced_text(&format!("{}-seg-{}", mid_for_ai, current_seg_counter), Some(&enhanced));
+                                                let _ = app_for_ai.emit("segment-enhanced", serde_json::json!({
+                                                    "segment_id": format!("{}-seg-{}", mid_for_ai, current_seg_counter),
+                                                    "enhanced_text": enhanced
+                                                }));
+                                            }
+                                        }
+
+                                        // Question detection
+                                        if detect_questions {
+                                            let transcript = transcript_for_ai.lock().await;
+                                            let idx = (current_seg_counter as usize).saturating_sub(1);
+                                            let curr_text = transcript.get(idx).map(|s| s.text.clone()).unwrap_or_default();
+                                            drop(transcript);
+
+                                            if let Ok(is_question) = client.detect_question(&curr_text).await {
+                                                if is_question {
+                                                    // Get context for answering
+                                                    let transcript = transcript_for_ai.lock().await;
+                                                    let ctx_start = idx.saturating_sub(5);
+                                                    let ctx_end = (idx + 6).min(transcript.len());
+                                                    let context: String = transcript[ctx_start..ctx_end].iter().map(|s| s.text.clone()).collect::<Vec<_>>().join("\n");
+                                                    drop(transcript);
+
+                                                    if let Ok(answer) = client.answer_question(&context, &curr_text).await {
+                                                        let seg_id = format!("{}-seg-{}", mid_for_ai, current_seg_counter);
+                                                        let _ = db_for_ai.update_segment_question(&seg_id, true, Some(&answer));
+                                                        let _ = app_for_ai.emit("question-detected", serde_json::json!({
+                                                            "segment_id": seg_id,
+                                                            "question": curr_text,
+                                                            "answer": answer
+                                                        }));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
 
                                 total_duration_ms += duration_ms;
 
@@ -520,6 +635,26 @@ pub async fn stop_recording(
                 drop(settings);
 
                 let client = LlmClient::new(provider);
+
+                // Auto-generate title first
+                let title_transcript: String = transcript_text.lines().take(10).collect::<Vec<_>>().join(" ");
+                match client.generate_title(&title_transcript).await {
+                    Ok(title) => {
+                        let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
+                        if !title.is_empty() {
+                            if let Err(e) = db_clone.update_meeting_title(&mid_clone, &title) {
+                                log::error!("Failed to auto-update meeting title: {}", e);
+                            } else {
+                                log::info!("Auto-title saved for meeting {}: {}", mid_clone, title);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Auto-title generation failed (non-critical): {}", e);
+                    }
+                }
+
+                // Then generate summary
                 match client.summarize(&transcript_text).await {
                     Ok(summary_text) => {
                         if let Err(e) = db_clone.save_meeting_summary(&mid_clone, &summary_text) {
@@ -2068,4 +2203,308 @@ pub async fn open_screen_recording_settings() -> Result<String, String> {
     {
         Ok("not_required".to_string())
     }
+}
+
+// ============================================================================
+// AI-Powered Features: Analytics, Enhancement, Web Search
+// ============================================================================
+
+/// Get meeting statistics for a date range
+#[tauri::command]
+pub async fn get_meeting_stats(
+    from_date: Option<String>,
+    to_date: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<MeetingStats, String> {
+    let (count, duration_ms) = state.db
+        .get_meeting_stats(from_date.as_deref(), to_date.as_deref())
+        .map_err(|e| format!("Failed to get stats: {}", e))?;
+    
+    Ok(MeetingStats {
+        meeting_count: count,
+        total_duration_ms: duration_ms,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct MeetingStats {
+    pub meeting_count: i64,
+    pub total_duration_ms: i64,
+}
+
+/// Extract metadata from a meeting (topics, action items, decisions)
+#[tauri::command]
+pub async fn extract_meeting_metadata(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<ExtractedMetadata, String> {
+    // Get full transcript
+    let segments = state.db.get_segments(&meeting_id)
+        .map_err(|e| format!("Failed to get segments: {}", e))?;
+    
+    let transcript = segments.iter()
+        .map(|s| s.text.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    
+    if transcript.is_empty() {
+        return Err("No transcript found for this meeting".to_string());
+    }
+
+    // Build LLM client
+    let provider = {
+        let settings = state.settings.lock().await;
+        match settings.llm_provider.as_str() {
+            "openai" => {
+                let api_key = settings.openai_api_key.clone()
+                    .ok_or("OpenAI API key not configured")?;
+                LlmProvider::OpenAI { api_key }
+            }
+            _ => {
+                let url = settings.ollama_url.clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string());
+                let model = settings.ollama_model.clone()
+                    .unwrap_or_else(|| "llama3.2".to_string());
+                LlmProvider::Ollama { url, model }
+            }
+        }
+    };
+    let client = LlmClient::new(provider);
+
+    // Extract metadata using LLM
+    let metadata = client.extract_metadata(&transcript)
+        .await
+        .map_err(|e| format!("Failed to extract metadata: {}", e))?;
+
+    // Save to database
+    let topics = serde_json::to_string(&metadata.topics).ok();
+    let action_items = serde_json::to_string(&metadata.action_items).ok();
+    let decisions = serde_json::to_string(&metadata.decisions).ok();
+    
+    state.db.update_meeting_metadata(
+        &meeting_id,
+        topics.as_deref(),
+        action_items.as_deref(),
+        decisions.as_deref(),
+        metadata.participant_count_estimate,
+    ).map_err(|e| format!("Failed to save metadata: {}", e))?;
+
+    Ok(ExtractedMetadata {
+        topics: metadata.topics,
+        action_items: metadata.action_items,
+        decisions: metadata.decisions,
+        participant_count: metadata.participant_count_estimate,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExtractedMetadata {
+    pub topics: Vec<String>,
+    pub action_items: Vec<String>,
+    pub decisions: Vec<String>,
+    pub participant_count: i32,
+}
+
+/// Enhance a transcript segment using AI
+#[tauri::command]
+pub async fn enhance_transcript_segment(
+    meeting_id: String,
+    segment_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    // Get segments
+    let segments = state.db.get_segments(&meeting_id)
+        .map_err(|e| format!("Failed to get segments: {}", e))?;
+    
+    // Find the target segment and its neighbors
+    let idx = segments.iter().position(|s| s.id == segment_id)
+        .ok_or("Segment not found")?;
+    
+    let prev_text = if idx > 0 { Some(segments[idx - 1].text.as_str()) } else { None };
+    let current_text = &segments[idx].text;
+    let next_text = if idx + 1 < segments.len() { Some(segments[idx + 1].text.as_str()) } else { None };
+
+    // Build LLM client
+    let provider = {
+        let settings = state.settings.lock().await;
+        match settings.llm_provider.as_str() {
+            "openai" => {
+                let api_key = settings.openai_api_key.clone()
+                    .ok_or("OpenAI API key not configured")?;
+                LlmProvider::OpenAI { api_key }
+            }
+            _ => {
+                let url = settings.ollama_url.clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string());
+                let model = settings.ollama_model.clone()
+                    .unwrap_or_else(|| "llama3.2".to_string());
+                LlmProvider::Ollama { url, model }
+            }
+        }
+    };
+    let client = LlmClient::new(provider);
+
+    // Enhance segment
+    let enhanced = client.enhance_segment(prev_text, current_text, next_text)
+        .await
+        .map_err(|e| format!("Failed to enhance segment: {}", e))?;
+
+    // Save to database
+    state.db.update_segment_enhanced_text(&segment_id, Some(&enhanced))
+        .map_err(|e| format!("Failed to save enhanced text: {}", e))?;
+
+    Ok(enhanced)
+}
+
+/// Detect if a segment contains a question and generate an answer
+#[tauri::command]
+pub async fn detect_and_answer_question(
+    meeting_id: String,
+    segment_id: String,
+    state: State<'_, AppState>,
+) -> Result<QuestionResult, String> {
+    // Get segments
+    let segments = state.db.get_segments(&meeting_id)
+        .map_err(|e| format!("Failed to get segments: {}", e))?;
+    
+    let idx = segments.iter().position(|s| s.id == segment_id)
+        .ok_or("Segment not found")?;
+    
+    let current_text = &segments[idx].text;
+
+    // Build LLM client
+    let provider = {
+        let settings = state.settings.lock().await;
+        match settings.llm_provider.as_str() {
+            "openai" => {
+                let api_key = settings.openai_api_key.clone()
+                    .ok_or("OpenAI API key not configured")?;
+                LlmProvider::OpenAI { api_key }
+            }
+            _ => {
+                let url = settings.ollama_url.clone()
+                    .unwrap_or_else(|| "http://localhost:11434".to_string());
+                let model = settings.ollama_model.clone()
+                    .unwrap_or_else(|| "llama3.2".to_string());
+                LlmProvider::Ollama { url, model }
+            }
+        }
+    };
+    let client = LlmClient::new(provider);
+
+    // Detect if it's a question
+    let is_question = client.detect_question(current_text)
+        .await
+        .map_err(|e| format!("Failed to detect question: {}", e))?;
+
+    let answer = if is_question {
+        // Get context from surrounding segments
+        let context_start = idx.saturating_sub(5);
+        let context_end = (idx + 6).min(segments.len());
+        let context: String = segments[context_start..context_end]
+            .iter()
+            .map(|s| s.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        
+        let ans = client.answer_question(current_text, &context)
+            .await
+            .map_err(|e| format!("Failed to generate answer: {}", e))?;
+        
+        // Save to database
+        state.db.update_segment_question(&segment_id, true, Some(&ans))
+            .map_err(|e| format!("Failed to save question: {}", e))?;
+        
+        Some(ans)
+    } else {
+        None
+    };
+
+    Ok(QuestionResult {
+        is_question,
+        answer,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct QuestionResult {
+    pub is_question: bool,
+    pub answer: Option<String>,
+}
+
+/// Web search command for Phomy
+#[tauri::command]
+pub async fn web_search(
+    query: String,
+) -> Result<Vec<WebSearchResult>, String> {
+    let client = crate::websearch::WebSearchClient::new();
+    let results = client.search(&query, 5)
+        .await
+        .map_err(|e| format!("Search failed: {}", e))?;
+    
+    Ok(results.into_iter().map(|r| WebSearchResult {
+        title: r.title,
+        url: r.url,
+        snippet: r.snippet,
+    }).collect())
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebSearchResult {
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
+}
+
+/// Ask Phomy with optional web search fallback
+#[tauri::command]
+pub async fn phomy_ask_with_search(
+    question: String,
+    use_web_search: bool,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    // First try to answer from meeting data
+    let answer = phomy_ask(question.clone(), state.clone()).await;
+    
+    // If answer fails or indicates no context, try web search
+    if use_web_search && (answer.is_err() || answer.as_ref().map(|a| a.contains("No meeting")).unwrap_or(false)) {
+        // Perform web search
+        let search_results = web_search(question.clone()).await?;
+        
+        if !search_results.is_empty() {
+            // Use LLM to synthesize answer from web results
+            let provider = {
+                let settings = state.settings.lock().await;
+                match settings.llm_provider.as_str() {
+                    "openai" => {
+                        let api_key = settings.openai_api_key.clone()
+                            .ok_or("OpenAI API key not configured")?;
+                        LlmProvider::OpenAI { api_key }
+                    }
+                    _ => {
+                        let url = settings.ollama_url.clone()
+                            .unwrap_or_else(|| "http://localhost:11434".to_string());
+                        let model = settings.ollama_model.clone()
+                            .unwrap_or_else(|| "llama3.2".to_string());
+                        LlmProvider::Ollama { url, model }
+                    }
+                }
+            };
+            let client = LlmClient::new(provider);
+            
+            let web_context = search_results.iter()
+                .map(|r| format!("{} - {}\n{}", r.title, r.url, r.snippet))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            
+            let system = "You are Phomy, a helpful assistant. Answer the user's question based on the web search results provided. Be accurate and cite sources when possible.";
+            let user = format!("Web search results:\n{}\n\nQuestion: {}", web_context, question);
+            
+            return client.complete(system, &user)
+                .await
+                .map_err(|e| format!("LLM error: {}", e));
+        }
+    }
+    
+    answer
 }

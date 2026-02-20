@@ -30,6 +30,11 @@ pub struct MeetingRow {
     pub duration_ms: i64,
     pub summary: Option<String>,
     pub tags: Option<String>,
+    // Metadata
+    pub topics: Option<String>,
+    pub action_items: Option<String>,
+    pub decisions: Option<String>,
+    pub participant_count: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -51,6 +56,29 @@ pub struct SegmentRow {
     pub text: String,
     pub timestamp_ms: i64,
     pub speaker_id: Option<String>,
+    // AI enhanced fields
+    #[serde(default)]
+    pub enhanced_text: Option<String>,
+    #[serde(default)]
+    pub is_question: bool,
+    #[serde(default)]
+    pub question_answer: Option<String>,
+}
+
+impl Default for SegmentRow {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            meeting_id: String::new(),
+            time_label: String::new(),
+            text: String::new(),
+            timestamp_ms: 0,
+            speaker_id: None,
+            enhanced_text: None,
+            is_question: false,
+            question_answer: None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -190,6 +218,41 @@ impl Database {
             log::info!("Added tags column to meetings table");
         }
 
+        // Migration: add metadata columns to meetings if they don't exist
+        let has_topics: bool = {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='topics'"
+            )?;
+            let count: i64 = stmt.query_row([], |row| row.get(0))?;
+            count > 0
+        };
+        if !has_topics {
+            conn.execute_batch(
+                "ALTER TABLE meetings ADD COLUMN topics TEXT;
+                 ALTER TABLE meetings ADD COLUMN action_items TEXT;
+                 ALTER TABLE meetings ADD COLUMN decisions TEXT;
+                 ALTER TABLE meetings ADD COLUMN participant_count INTEGER DEFAULT 0;"
+            )?;
+            log::info!("Added metadata columns to meetings table");
+        }
+
+        // Migration: add enhanced_text column to transcript_segments if it doesn't exist
+        let has_enhanced_text: bool = {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('transcript_segments') WHERE name='enhanced_text'"
+            )?;
+            let count: i64 = stmt.query_row([], |row| row.get(0))?;
+            count > 0
+        };
+        if !has_enhanced_text {
+            conn.execute_batch(
+                "ALTER TABLE transcript_segments ADD COLUMN enhanced_text TEXT;
+                 ALTER TABLE transcript_segments ADD COLUMN is_question INTEGER DEFAULT 0;
+                 ALTER TABLE transcript_segments ADD COLUMN question_answer TEXT;"
+            )?;
+            log::info!("Added enhanced_text and question columns to transcript_segments table");
+        }
+
         // Create speakers table if it doesn't exist
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS speakers (
@@ -219,7 +282,7 @@ impl Database {
     pub fn get_meeting(&self, id: &str) -> Result<Option<MeetingRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, created_at, ended_at, pinned, duration_ms, summary, tags FROM meetings WHERE id = ?1",
+            "SELECT id, title, created_at, ended_at, pinned, duration_ms, summary, tags, topics, action_items, decisions, participant_count FROM meetings WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], |row| {
             Ok(MeetingRow {
@@ -231,6 +294,10 @@ impl Database {
                 duration_ms: row.get(5)?,
                 summary: row.get(6)?,
                 tags: row.get(7)?,
+                topics: row.get(8)?,
+                action_items: row.get(9)?,
+                decisions: row.get(10)?,
+                participant_count: row.get(11)?,
             })
         })?;
         match rows.next() {
@@ -262,6 +329,49 @@ impl Database {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(items)
+    }
+
+    /// Get meetings within a date range (for analytics)
+    pub fn get_meetings_in_range(&self, from_date: &str, to_date: &str) -> Result<Vec<MeetingListItem>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.title, m.created_at, m.pinned, m.duration_ms, m.tags,
+                    (SELECT COUNT(*) FROM transcript_segments WHERE meeting_id = m.id) as seg_count
+             FROM meetings m
+             WHERE m.created_at >= ?1 AND m.created_at <= ?2
+             ORDER BY m.created_at DESC",
+        )?;
+        let items = stmt
+            .query_map(params![from_date, to_date], |row| {
+                Ok(MeetingListItem {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    created_at: row.get(2)?,
+                    pinned: row.get::<_, i32>(3)? != 0,
+                    duration_ms: row.get(4)?,
+                    tags: row.get(5)?,
+                    segment_count: row.get(6)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(items)
+    }
+
+    /// Get meeting count and total duration for analytics
+    pub fn get_meeting_stats(&self, from_date: Option<&str>, to_date: Option<&str>) -> Result<(i64, i64)> {
+        let conn = self.conn.lock().unwrap();
+        let (count, duration): (i64, i64) = if let (Some(from), Some(to)) = (from_date, to_date) {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM meetings WHERE created_at >= ?1 AND created_at <= ?2"
+            )?;
+            stmt.query_row(params![from, to], |row| Ok((row.get(0)?, row.get(1)?)))?
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM meetings"
+            )?;
+            stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        };
+        Ok((count, duration))
     }
 
     pub fn update_meeting_title(&self, id: &str, title: &str) -> Result<()> {
@@ -362,6 +472,9 @@ impl Database {
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
                     speaker_id: row.get(5)?,
+                    enhanced_text: None,
+                    is_question: false,
+                    question_answer: None,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -387,6 +500,9 @@ impl Database {
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
                     speaker_id: row.get(5)?,
+                    enhanced_text: None,
+                    is_question: false,
+                    question_answer: None,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -417,7 +533,7 @@ impl Database {
     pub fn get_segments(&self, meeting_id: &str) -> Result<Vec<SegmentRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id FROM transcript_segments WHERE meeting_id = ?1 ORDER BY timestamp_ms ASC",
+            "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id, enhanced_text, is_question, question_answer FROM transcript_segments WHERE meeting_id = ?1 ORDER BY timestamp_ms ASC",
         )?;
         let segments = stmt
             .query_map(params![meeting_id], |row| {
@@ -428,6 +544,9 @@ impl Database {
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
                     speaker_id: row.get(5)?,
+                    enhanced_text: row.get(6)?,
+                    is_question: row.get::<_, i32>(7)? != 0,
+                    question_answer: row.get(8)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -440,6 +559,36 @@ impl Database {
         conn.execute(
             "UPDATE transcript_segments SET text = ?1 WHERE id = ?2",
             params![text, segment_id],
+        )?;
+        Ok(())
+    }
+
+    /// Update segment enhanced text
+    pub fn update_segment_enhanced_text(&self, segment_id: &str, enhanced_text: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE transcript_segments SET enhanced_text = ?1 WHERE id = ?2",
+            params![enhanced_text, segment_id],
+        )?;
+        Ok(())
+    }
+
+    /// Update segment question and answer
+    pub fn update_segment_question(&self, segment_id: &str, is_question: bool, answer: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE transcript_segments SET is_question = ?1, question_answer = ?2 WHERE id = ?3",
+            params![is_question as i32, answer, segment_id],
+        )?;
+        Ok(())
+    }
+
+    /// Update meeting metadata
+    pub fn update_meeting_metadata(&self, id: &str, topics: Option<&str>, action_items: Option<&str>, decisions: Option<&str>, participant_count: i32) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE meetings SET topics = ?1, action_items = ?2, decisions = ?3, participant_count = ?4 WHERE id = ?5",
+            params![topics, action_items, decisions, participant_count, id],
         )?;
         Ok(())
     }

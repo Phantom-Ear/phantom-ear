@@ -60,6 +60,13 @@ function createMeetingsStore() {
     }
   }
 
+  // Update meeting title locally (for real-time AI updates during recording)
+  function updateMeetingTitle(id: string, title: string) {
+    meetings = meetings.map(m =>
+      m.id === id ? { ...m, title } : m
+    );
+  }
+
   async function updateMeetingTags(id: string, tags: string | null) {
     try {
       await invoke('update_meeting_tags', { id, tags });
@@ -152,6 +159,7 @@ function createMeetingsStore() {
     setActiveTranscript,
     addLocalSegment,
     renameMeeting,
+    updateMeetingTitle,
     updateMeetingTags,
     togglePin,
     deleteMeeting,
