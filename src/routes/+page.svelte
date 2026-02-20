@@ -379,6 +379,7 @@
     // Listen for meeting title updates
     unlistenMeetingTitleUpdated = await listen<{ meeting_id: string; title: string }>("meeting-title-updated", (event) => {
       const data = event.payload;
+      console.log("Meeting title updated:", data);
       // Update the meeting title in the store if it's the current recording
       if (data.meeting_id === liveRecordingMeetingId) {
         meetingsStore.updateMeetingTitle(data.meeting_id, data.title);
@@ -388,12 +389,14 @@
     // Listen for enhanced transcript segments
     unlistenSegmentEnhanced = await listen<{ segment_id: string; enhanced_text: string }>("segment-enhanced", (event) => {
       const data = event.payload;
+      console.log("Segment enhanced:", data);
       liveEnhancedText = data.enhanced_text;
     });
 
     // Listen for detected questions
     unlistenQuestionDetected = await listen<{ segment_id: string; question: string; answer: string }>("question-detected", (event) => {
       const data = event.payload;
+      console.log("Question detected:", data);
       liveQuestions = [...liveQuestions, {
         id: data.segment_id,
         question: data.question,

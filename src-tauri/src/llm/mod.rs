@@ -195,6 +195,36 @@ impl LlmClient {
         self.complete(system, &user).await
     }
 
+    /// Enhance a batch of transcript segments together for better context
+    pub async fn enhance_batch(&self, segments: &[String]) -> Result<Vec<String>> {
+        if segments.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Join all segments with context
+        let context = segments.iter().enumerate()
+            .map(|(i, s)| format!("Segment {}: {}", i + 1, s))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let system = "You are a transcription enhancer. Improve the clarity of the transcript segments. \
+                      Fix any misheard words, add proper punctuation, make it more readable and well-structured. \
+                      For each segment, provide the enhanced version. \
+                      Return the enhanced segments as a JSON array of strings, nothing else.";
+        let user = format!("Enhance these transcript segments as a JSON array:\n\n[\n{}\n]", context);
+        
+        let result = self.complete(system, &user).await?;
+        
+        // Parse the JSON array result
+        let parsed: Vec<String> = serde_json::from_str(&result)
+            .unwrap_or_else(|_| {
+                // If parsing fails, try to extract segments from the text
+                segments.iter().cloned().collect()
+            });
+        
+        Ok(parsed)
+    }
+
     /// Detect if text contains a question
     pub async fn detect_question(&self, text: &str) -> Result<bool> {
         let system = "You are a helpful assistant. Determine if the given text contains a question being asked. \
