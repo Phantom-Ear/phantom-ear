@@ -60,6 +60,17 @@ function createMeetingsStore() {
     }
   }
 
+  async function updateMeetingTags(id: string, tags: string | null) {
+    try {
+      await invoke('update_meeting_tags', { id, tags });
+      meetings = meetings.map(m =>
+        m.id === id ? { ...m, tags } : m
+      );
+    } catch (e) {
+      console.error('Failed to update meeting tags:', e);
+    }
+  }
+
   async function togglePin(id: string) {
     try {
       await invoke('toggle_pin_meeting', { id });
@@ -141,6 +152,7 @@ function createMeetingsStore() {
     setActiveTranscript,
     addLocalSegment,
     renameMeeting,
+    updateMeetingTags,
     togglePin,
     deleteMeeting,
     searchMeetings,

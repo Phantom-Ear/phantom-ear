@@ -79,6 +79,8 @@
 
   // Export state
   let exportCopied = $state(false);
+  let exportDropdownOpen = $state(false);
+  let selectedExportFormat = $state("markdown");
 
   // Speakers state
   let speakers = $state<Speaker[]>([]);
@@ -798,17 +800,35 @@
     currentView = 'home';
   }
 
-  async function handleExportMeeting() {
+  async function handleExportMeeting(action: 'copy' | 'save' = 'copy') {
     const meetingId = meetingsStore.activeMeetingId;
     if (!meetingId) return;
     try {
-      const md = await meetingsStore.exportMeeting(meetingId, 'markdown');
-      await navigator.clipboard.writeText(md);
-      exportCopied = true;
-      setTimeout(() => { exportCopied = false; }, 2000);
+      if (action === 'copy') {
+        // Copy to clipboard (legacy behavior)
+        const md = await meetingsStore.exportMeeting(meetingId, selectedExportFormat);
+        await navigator.clipboard.writeText(md);
+        exportCopied = true;
+        setTimeout(() => { exportCopied = false; }, 2000);
+      } else {
+        // Save to file with dialog
+        await invoke("export_meeting_to_file", {
+          id: meetingId,
+          format: selectedExportFormat
+        });
+        exportDropdownOpen = false;
+      }
     } catch (e) {
       console.error("Failed to export meeting:", e);
     }
+  }
+
+  function toggleExportDropdown() {
+    exportDropdownOpen = !exportDropdownOpen;
+  }
+
+  function selectExportFormat(format: string) {
+    selectedExportFormat = format;
   }
 
   function handleSegmentUpdate(updatedSegment: TranscriptSegment) {
@@ -881,6 +901,7 @@
       onSearch={handleSearch}
       onOpenSearchOverlay={() => showSearchOverlay = true}
       onToggleRecording={toggleRecording}
+      onUpdateMeetingTags={(id, tags) => meetingsStore.updateMeetingTags(id, tags)}
     />
 
     <!-- Main Content -->
@@ -1057,12 +1078,57 @@
                 </div>
                 <div class="flex items-center gap-2">
                   {#if transcript.length > 0}
-                    <button
-                      onclick={handleExportMeeting}
-                      class="px-2 py-1 text-xs rounded-md bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-accent transition-colors"
-                    >
-                      {exportCopied ? 'Copied!' : 'Export'}
-                    </button>
+                    <div class="relative" onkeydown={(e) => e.key === 'Escape' && (exportDropdownOpen = false)}>
+                      <button
+                        onclick={toggleExportDropdown}
+                        class="px-2 py-1 text-xs rounded-md bg-phantom-ear-surface border border-phantom-ear-border text-phantom-ear-text-muted hover:text-phantom-ear-text hover:border-phantom-ear-accent transition-colors flex items-center gap-1"
+                      >
+                        {exportCopied ? 'Copied!' : 'Export'}
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      {#if exportDropdownOpen}
+                        <!-- Click outside to close -->
+                        <div 
+                          class="fixed inset-0 z-0" 
+                          onclick={() => exportDropdownOpen = false}
+                          onkeydown={() => {}}
+                          role="button"
+                          tabindex="-1"
+                        ></div>
+                        <div class="absolute right-0 top-full mt-1 w-36 bg-phantom-ear-surface border border-phantom-ear-border rounded-lg shadow-lg z-10 overflow-hidden">
+                          <div class="px-2 py-1.5 text-[10px] text-phantom-ear-text-muted border-b border-phantom-ear-border">
+                            Format
+                          </div>
+                          <button
+                            onclick={() => { selectExportFormat('markdown'); handleExportMeeting('copy'); }}
+                            class="w-full px-3 py-2 text-left text-xs hover:bg-phantom-ear-surface-hover transition-colors {selectedExportFormat === 'markdown' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text'}"
+                          >
+                            📄 Markdown
+                          </button>
+                          <button
+                            onclick={() => { selectExportFormat('txt'); handleExportMeeting('copy'); }}
+                            class="w-full px-3 py-2 text-left text-xs hover:bg-phantom-ear-surface-hover transition-colors {selectedExportFormat === 'txt' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text'}"
+                          >
+                            📝 Plain Text
+                          </button>
+                          <button
+                            onclick={() => { selectExportFormat('srt'); handleExportMeeting('copy'); }}
+                            class="w-full px-3 py-2 text-left text-xs hover:bg-phantom-ear-surface-hover transition-colors {selectedExportFormat === 'srt' ? 'text-phantom-ear-accent' : 'text-phantom-ear-text'}"
+                          >
+                            🎬 Subtitle (SRT)
+                          </button>
+                          <div class="border-t border-phantom-ear-border"></div>
+                          <button
+                            onclick={() => handleExportMeeting('save')}
+                            class="w-full px-3 py-2 text-left text-xs hover:bg-phantom-ear-surface-hover transition-colors text-phantom-ear-accent"
+                          >
+                            💾 Save As...
+                          </button>
+                        </div>
+                      {/if}
+                    </div>
                   {/if}
                 </div>
               </div>
