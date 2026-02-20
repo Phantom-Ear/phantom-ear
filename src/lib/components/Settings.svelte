@@ -14,6 +14,9 @@
     language: string;
     asr_backend: string;
     audio_device: string | null;
+    // AI Features
+    enhance_transcripts: boolean;
+    detect_questions: boolean;
   }
 
   interface ModelInfo {
@@ -49,6 +52,9 @@
     language: "en",
     asr_backend: "whisper",
     audio_device: null,
+    // AI Features (default off)
+    enhance_transcripts: false,
+    detect_questions: false,
   });
 
   let asrBackends = $state<BackendInfo[]>([]);
@@ -539,6 +545,35 @@
             <p class="mt-1 text-[11px] text-phantom-ear-text-muted">Stored locally, never shared</p>
           </div>
         {/if}
+
+        <!-- AI Features Toggles -->
+        <div class="space-y-3 mt-4 pt-4 border-t border-phantom-ear-border/50">
+          <h4 class="text-sm font-medium text-phantom-ear-text">Real-time AI Features</h4>
+          
+          <label class="flex items-center justify-between p-3 bg-phantom-ear-bg rounded-lg border border-phantom-ear-border cursor-pointer hover:border-phantom-ear-accent transition-colors">
+            <div>
+              <span class="text-sm text-phantom-ear-text">Enhance Transcripts</span>
+              <p class="text-[11px] text-phantom-ear-text-muted">AI improves clarity and fixes errors</p>
+            </div>
+            <input 
+              type="checkbox" 
+              bind:checked={settings.enhance_transcripts}
+              class="w-5 h-5 rounded border-phantom-ear-border text-phantom-ear-accent focus:ring-phantom-ear-accent focus:ring-offset-0 bg-phantom-ear-surface"
+            />
+          </label>
+
+          <label class="flex items-center justify-between p-3 bg-phantom-ear-bg rounded-lg border border-phantom-ear-border cursor-pointer hover:border-phantom-ear-accent transition-colors">
+            <div>
+              <span class="text-sm text-phantom-ear-text">Detect Questions</span>
+              <p class="text-[11px] text-phantom-ear-text-muted">AI detects questions and generates answers</p>
+            </div>
+            <input 
+              type="checkbox" 
+              bind:checked={settings.detect_questions}
+              class="w-5 h-5 rounded border-phantom-ear-border text-phantom-ear-accent focus:ring-phantom-ear-accent focus:ring-offset-0 bg-phantom-ear-surface"
+            />
+          </label>
+        </div>
       {/if}
     </div>
 

@@ -163,7 +163,14 @@
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let unlistenTranscription: UnlistenFn | null = null;
   let unlistenTray: UnlistenFn | null = null;
+  let unlistenMeetingTitleUpdated: UnlistenFn | null = null;
+  let unlistenSegmentEnhanced: UnlistenFn | null = null;
+  let unlistenQuestionDetected: UnlistenFn | null = null;
   let transcriptContainer: HTMLDivElement | null = null;
+
+  // Live AI insights during recording
+  let liveEnhancedText = $state("");
+  let liveQuestions = $state<Array<{ id: string; question: string; answer: string; timestamp: string }>>([]);
 
   onMount(async () => {
     try {
@@ -367,6 +374,54 @@
     });
   }
 
+  // Subscribe to AI events during recording
+  async function startAIEventListeners() {
+    // Listen for meeting title updates
+    unlistenMeetingTitleUpdated = await listen<{ meeting_id: string; title: string }>("meeting-title-updated", (event) => {
+      const data = event.payload;
+      // Update the meeting title in the store if it's the current recording
+      if (data.meeting_id === liveRecordingMeetingId) {
+        meetingsStore.updateMeetingTitle(data.meeting_id, data.title);
+      }
+    });
+
+    // Listen for enhanced transcript segments
+    unlistenSegmentEnhanced = await listen<{ segment_id: string; enhanced_text: string }>("segment-enhanced", (event) => {
+      const data = event.payload;
+      liveEnhancedText = data.enhanced_text;
+    });
+
+    // Listen for detected questions
+    unlistenQuestionDetected = await listen<{ segment_id: string; question: string; answer: string }>("question-detected", (event) => {
+      const data = event.payload;
+      liveQuestions = [...liveQuestions, {
+        id: data.segment_id,
+        question: data.question,
+        answer: data.answer,
+        timestamp: new Date().toLocaleTimeString()
+      }];
+    });
+  }
+
+  // Stop AI event listeners
+  function stopAIEventListeners() {
+    if (unlistenMeetingTitleUpdated) {
+      unlistenMeetingTitleUpdated();
+      unlistenMeetingTitleUpdated = null;
+    }
+    if (unlistenSegmentEnhanced) {
+      unlistenSegmentEnhanced();
+      unlistenSegmentEnhanced = null;
+    }
+    if (unlistenQuestionDetected) {
+      unlistenQuestionDetected();
+      unlistenQuestionDetected = null;
+    }
+    // Clear live insights
+    liveEnhancedText = "";
+    liveQuestions = [];
+  }
+
   // Stop transcription listener
   function stopTranscriptionListener() {
     if (unlistenTranscription) {
@@ -400,6 +455,9 @@
 
       // Stop transcription listener
       stopTranscriptionListener();
+      
+      // Stop AI event listeners
+      stopAIEventListeners();
 
       try {
         const result = await invoke<TranscriptSegment[]>("stop_recording");
@@ -425,6 +483,9 @@
 
         // Start listening for transcription events BEFORE starting recording
         await startTranscriptionListener();
+        
+        // Start AI event listeners
+        await startAIEventListeners();
 
         // start_recording now returns meeting ID
         const meetingId = await invoke<string>("start_recording");
@@ -442,6 +503,7 @@
       } catch (e) {
         console.error("Failed to start recording:", e);
         stopTranscriptionListener();
+        stopAIEventListeners();
       }
     }
   }
@@ -973,6 +1035,43 @@
           {:else if isRecording}
             <!-- LIVE RECORDING VIEW -->
             <div class="flex-1 flex flex-col p-6 overflow-hidden">
+              <!-- Live AI Insights Panel -->
+              {#if liveEnhancedText || liveQuestions.length > 0}
+                <div class="mb-4 p-4 bg-phantom-ear-surface rounded-lg border border-phantom-ear-accent/30">
+                  <h3 class="text-sm font-medium text-phantom-ear-accent mb-3 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Live AI Insights
+                  </h3>
+                  
+                  <!-- Enhanced Transcript -->
+                  {#if liveEnhancedText}
+                    <div class="mb-3 p-3 bg-phantom-ear-bg rounded-lg">
+                      <span class="text-[11px] text-phantom-ear-text-muted uppercase tracking-wide">Enhanced</span>
+                      <p class="text-sm text-phantom-ear-text mt-1">{liveEnhancedText}</p>
+                    </div>
+                  {/if}
+                  
+                  <!-- Detected Questions & Answers -->
+                  {#if liveQuestions.length > 0}
+                    <div class="space-y-2 max-h-40 overflow-y-auto">
+                      {#each liveQuestions.slice(-3) as qa (qa.id)}
+                        <div class="p-3 bg-phantom-ear-bg rounded-lg">
+                          <div class="flex items-start gap-2">
+                            <span class="text-phantom-ear-accent text-lg leading-none">?</span>
+                            <div>
+                              <p class="text-sm text-phantom-ear-text font-medium">{qa.question}</p>
+                              <p class="text-sm text-phantom-ear-text-muted mt-1">{qa.answer}</p>
+                            </div>
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+
               <!-- Timeline -->
               <div class="mb-4">
                 <TranscriptTimeline
