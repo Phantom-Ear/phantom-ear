@@ -387,10 +387,17 @@
     });
 
     // Listen for enhanced transcript segments
-    unlistenSegmentEnhanced = await listen<{ segment_id: string; enhanced_text: string }>("segment-enhanced", (event) => {
+    unlistenSegmentEnhanced = await listen<{ segment_ids?: string[]; segment_id?: string; enhanced_text: string }>("segment-enhanced", (event) => {
       const data = event.payload;
       console.log("Segment enhanced:", data);
-      liveEnhancedText = data.enhanced_text;
+      // Handle both old format (segment_id) and new format (segment_ids)
+      if (data.segment_ids) {
+        // New format: semantic reconstruction covering multiple segments
+        liveEnhancedText = data.enhanced_text;
+      } else if (data.segment_id) {
+        // Old format: single segment enhancement
+        liveEnhancedText = data.enhanced_text;
+      }
     });
 
     // Listen for detected questions

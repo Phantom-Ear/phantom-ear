@@ -495,20 +495,25 @@ async fn run_transcription_loop_with_storage(
                                             drop(transcript);
 
                                             if segments.len() >= 3 {
-                                                // Send batch to LLM for enhancement
+                                                // Send batch to LLM for semantic reconstruction
                                                 if let Ok(enhanced_segments) = client.enhance_batch(&segments).await {
-                                                    log::info!("Enhanced batch of {} segments", enhanced_segments.len());
-                                                    // Emit each enhanced segment
-                                                    for (i, enhanced) in enhanced_segments.iter().enumerate() {
-                                                        if i < segment_ids.len() {
-                                                            let _ = db_for_ai.update_segment_enhanced_text(&segment_ids[i], Some(enhanced));
-                                                            let _ = app_for_ai.emit("segment-enhanced", serde_json::json!({
-                                                                "segment_id": segment_ids[i],
-                                                                "enhanced_text": enhanced
-                                                            }));
-                                                            log::info!("Emitted segment-enhanced for {}", segment_ids[i]);
-                                                        }
+                                                    // The result is a single coherent piece that covers all segments
+                                                    // Emit as one combined enhanced text
+                                                    let combined_text = enhanced_segments.join("\n\n");
+                                                    
+                                                    // Store enhanced text for each segment
+                                                    for seg_id in &segment_ids {
+                                                        let _ = db_for_ai.update_segment_enhanced_text(seg_id, Some(&combined_text));
                                                     }
+                                                    
+                                                    // Emit the combined enhanced text
+                                                    let _ = app_for_ai.emit("segment-enhanced", serde_json::json!({
+                                                        "segment_ids": segment_ids,
+                                                        "enhanced_text": combined_text
+                                                    }));
+                                                    log::info!("Emitted semantic reconstruction for segments {}-{}", 
+                                                        segment_ids.first().unwrap_or(&String::new()),
+                                                        segment_ids.last().unwrap_or(&String::new()));
                                                 }
                                             }
                                         }
