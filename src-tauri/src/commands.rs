@@ -1137,6 +1137,11 @@ pub async fn phomy_ask(
     question: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    // Helper to get display text (prefer enhanced text when available)
+    let get_display_text = |s: &SegmentRow| -> String {
+        s.enhanced_text.as_ref().unwrap_or(&s.text).clone()
+    };
+    
     let q = question.to_lowercase();
 
     // Build LLM client from settings
@@ -1180,7 +1185,11 @@ pub async fn phomy_ask(
                 recent.iter().map(|s| format!("[{}] {}", s.time, s.text)).collect::<Vec<_>>().join("\n")
             } else if let Some(mid) = active_mid {
                 let segs = state.db.get_last_segments(&mid, 10).map_err(|e| format!("DB error: {}", e))?;
-                segs.iter().map(|s| format!("[{}] {}", s.time_label, s.text)).collect::<Vec<_>>().join("\n")
+                // Use enhanced text when available
+                segs.iter().map(|s| {
+                    let text = s.enhanced_text.as_ref().unwrap_or(&s.text);
+                    format!("[{}] {}", s.time_label, text)
+                }).collect::<Vec<_>>().join("\n")
             } else {
                 return Err("No active meeting to reference.".to_string());
             }
