@@ -78,8 +78,8 @@ impl Default for Settings {
             asr_backend: "whisper".to_string(),
             audio_device: None,
             // AI Features (default off)
-            enhance_transcripts: false,
-            detect_questions: false,
+            enhance_transcripts: true,
+            detect_questions: true,
         }
     }
 }
@@ -437,6 +437,8 @@ async fn run_transcription_loop_with_storage(
                                     let settings = settings_for_ai.lock().await;
                                     let enhance_transcripts = settings.enhance_transcripts;
                                     let detect_questions = settings.detect_questions;
+                                    
+                                    log::info!("AI Processing check - enhance: {}, detect_questions: {}", enhance_transcripts, detect_questions);
                                     drop(settings);
 
                                     // Build LLM client
@@ -478,32 +480,55 @@ async fn run_transcription_loop_with_storage(
                                             }
                                         }
 
-                                        // Transcript enhancement
-                                        if enhance_transcripts {
+                                        // Transcript enhancement - batch 5 segments together for better context
+                                        if enhance_transcripts && current_seg_counter % 5 == 0 {
                                             let transcript = transcript_for_ai.lock().await;
-                                            let idx = (current_seg_counter as usize).saturating_sub(1);
-                                            let prev_text = if idx > 0 { transcript.get(idx - 1).map(|s| s.text.clone()) } else { None };
-                                            let curr_text = transcript.get(idx).map(|s| s.text.clone()).unwrap_or_default();
-                                            let next_text = transcript.get(idx + 1).map(|s| s.text.clone());
+                                            // Get the last 5 segments (or fewer if not enough)
+                                            let start_idx = (current_seg_counter as usize).saturating_sub(5);
+                                            let segments: Vec<String> = transcript[start_idx..current_seg_counter as usize]
+                                                .iter()
+                                                .map(|s| s.text.clone())
+                                                .collect();
+                                            let segment_ids: Vec<String> = (start_idx..current_seg_counter as usize)
+                                                .map(|i| format!("{}-seg-{}", mid_for_ai, i + 1))
+                                                .collect();
                                             drop(transcript);
 
-                                            if let Ok(enhanced) = client.enhance_segment(prev_text.as_deref(), &curr_text, next_text.as_deref()).await {
-                                                let _ = db_for_ai.update_segment_enhanced_text(&format!("{}-seg-{}", mid_for_ai, current_seg_counter), Some(&enhanced));
-                                                let _ = app_for_ai.emit("segment-enhanced", serde_json::json!({
-                                                    "segment_id": format!("{}-seg-{}", mid_for_ai, current_seg_counter),
-                                                    "enhanced_text": enhanced
-                                                }));
+                                            if segments.len() >= 3 {
+                                                // Send batch to LLM for semantic reconstruction
+                                                if let Ok(enhanced_segments) = client.enhance_batch(&segments).await {
+                                                    // The result is a single coherent piece that covers all segments
+                                                    // Emit as one combined enhanced text
+                                                    let combined_text = enhanced_segments.join("\n\n");
+                                                    
+                                                    // Store enhanced text for each segment
+                                                    for seg_id in &segment_ids {
+                                                        let _ = db_for_ai.update_segment_enhanced_text(seg_id, Some(&combined_text));
+                                                    }
+                                                    
+                                                    // Emit the combined enhanced text
+                                                    let _ = app_for_ai.emit("segment-enhanced", serde_json::json!({
+                                                        "segment_ids": segment_ids,
+                                                        "enhanced_text": combined_text
+                                                    }));
+                                                    log::info!("Emitted semantic reconstruction for segments {}-{}", 
+                                                        segment_ids.first().unwrap_or(&String::new()),
+                                                        segment_ids.last().unwrap_or(&String::new()));
+                                                }
                                             }
                                         }
 
-                                        // Question detection
+                                        // Question detection - check every segment for questions
                                         if detect_questions {
                                             let transcript = transcript_for_ai.lock().await;
                                             let idx = (current_seg_counter as usize).saturating_sub(1);
                                             let curr_text = transcript.get(idx).map(|s| s.text.clone()).unwrap_or_default();
                                             drop(transcript);
 
+                                            log::info!("Checking for question in segment {}", current_seg_counter);
+                                            
                                             if let Ok(is_question) = client.detect_question(&curr_text).await {
+                                                log::info!("Question detection result: {}", is_question);
                                                 if is_question {
                                                     // Get context for answering
                                                     let transcript = transcript_for_ai.lock().await;
@@ -520,6 +545,7 @@ async fn run_transcription_loop_with_storage(
                                                             "question": curr_text,
                                                             "answer": answer
                                                         }));
+                                                        log::info!("Question detected and emitted: {}", curr_text);
                                                     }
                                                 }
                                             }
@@ -1111,6 +1137,11 @@ pub async fn phomy_ask(
     question: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    // Helper to get display text (prefer enhanced text when available)
+    let get_display_text = |s: &SegmentRow| -> String {
+        s.enhanced_text.as_ref().unwrap_or(&s.text).clone()
+    };
+    
     let q = question.to_lowercase();
 
     // Build LLM client from settings
@@ -1154,7 +1185,11 @@ pub async fn phomy_ask(
                 recent.iter().map(|s| format!("[{}] {}", s.time, s.text)).collect::<Vec<_>>().join("\n")
             } else if let Some(mid) = active_mid {
                 let segs = state.db.get_last_segments(&mid, 10).map_err(|e| format!("DB error: {}", e))?;
-                segs.iter().map(|s| format!("[{}] {}", s.time_label, s.text)).collect::<Vec<_>>().join("\n")
+                // Use enhanced text when available
+                segs.iter().map(|s| {
+                    let text = s.enhanced_text.as_ref().unwrap_or(&s.text);
+                    format!("[{}] {}", s.time_label, text)
+                }).collect::<Vec<_>>().join("\n")
             } else {
                 return Err("No active meeting to reference.".to_string());
             }

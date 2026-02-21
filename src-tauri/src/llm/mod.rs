@@ -195,6 +195,41 @@ impl LlmClient {
         self.complete(system, &user).await
     }
 
+    /// Enhance a batch of transcript segments together with semantic reconstruction
+    /// This takes multiple segments and rewrites them as a coherent piece with better meaning
+    pub async fn enhance_batch(&self, segments: &[String]) -> Result<Vec<String>> {
+        if segments.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Join all segments to form a continuous transcript
+        let transcript = segments.iter()
+            .enumerate()
+            .map(|(i, s)| format!("Segment {}: {}", i + 1, s))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let system = "You are a transcription enhancer and semantic reconstructor. 
+                      Your task is to take these transcript segments and rewrite them as a single, coherent piece of text.
+                      
+                      Guidelines:
+                      - Combine segments into a unified narrative
+                      - Fix any misheard words or grammar issues
+                      - Add proper punctuation and formatting
+                      - Preserve the original meaning and intent
+                      - You may reorganize words across segments for better flow
+                      - Make it readable and well-structured
+                      
+                      Return the rewritten transcript as a single coherent piece. 
+                      Return ONLY the enhanced text, nothing else.";
+        let user = format!("Rewrite these transcript segments into a coherent piece:\n\n{}", transcript);
+        
+        let result = self.complete(system, &user).await?;
+        
+        // Return as a single element - the coherent reconstruction
+        Ok(vec![result.trim().to_string()])
+    }
+
     /// Detect if text contains a question
     pub async fn detect_question(&self, text: &str) -> Result<bool> {
         let system = "You are a helpful assistant. Determine if the given text contains a question being asked. \

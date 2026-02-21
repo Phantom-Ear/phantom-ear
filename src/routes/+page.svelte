@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
+  import { marked } from "marked";
   import Setup from "$lib/components/Setup.svelte";
   import Settings from "$lib/components/Settings.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -16,6 +17,16 @@
   import { meetingsStore } from "$lib/stores/meetings.svelte";
   import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
   import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker } from "$lib/types";
+
+  // Markdown rendering helper
+  function renderMarkdown(text: string): string {
+    if (!text) return '';
+    try {
+      return marked.parse(text, { async: false }) as string;
+    } catch {
+      return text;
+    }
+  }
 
   interface DownloadProgress {
     model_name: string;
@@ -69,6 +80,12 @@
   let phomyReferences = $state<SemanticSearchResult[]>([]);
   let phomyContextLimit = $state(10);
   let phomyHistory = $state<Array<{ role: 'user' | 'assistant'; text: string; refs?: SemanticSearchResult[] }>>([]);
+  
+  // Track expanded references (by message index)
+  let expandedRefs = $state<Set<number>>(new Set());
+  
+  // Chat container reference for auto-scroll
+  let phomyChatContainer: HTMLDivElement | null = null;
 
   // Embedding state
   let embeddingModelLoaded = $state(false);
@@ -76,6 +93,21 @@
   let embeddingDownloadFailed = $state(false);
   let showEmbeddingManualDownload = $state(false);
   let embeddingImporting = $state(false);
+
+  // Split panel state for recording view
+  let transcriptPanelCollapsed = $state(false);
+  let aiPanelCollapsed = $state(false);
+
+  // Suggested questions state
+  let suggestedQuestions = $state<string[]>([]);
+  let showSuggestedQuestions = $state(false);
+  
+  // Persistent summary (shown after meeting ends)
+  let showPersistentSummary = $state(false);
+  let persistentSummary = $state<Summary | null>(null);
+
+  // AI Conversation history
+  let aiConversation = $state<{question: string, answer: string}[]>([]);
 
   // Export state
   let exportCopied = $state(false);
@@ -117,6 +149,11 @@
   // Derived: Should show recording indicator (recording AND navigated away from live view)?
   const showRecordingIndicator = $derived(
     isRecording && (currentView !== 'home' || isViewingPastMeeting)
+  );
+
+  // Derived: Should show the split panel view (during recording OR after with persistent summary)
+  const showSplitPanel = $derived(
+    isRecording || showPersistentSummary
   );
 
   // Return to live recording
@@ -379,6 +416,7 @@
     // Listen for meeting title updates
     unlistenMeetingTitleUpdated = await listen<{ meeting_id: string; title: string }>("meeting-title-updated", (event) => {
       const data = event.payload;
+      console.log("Meeting title updated:", data);
       // Update the meeting title in the store if it's the current recording
       if (data.meeting_id === liveRecordingMeetingId) {
         meetingsStore.updateMeetingTitle(data.meeting_id, data.title);
@@ -386,14 +424,23 @@
     });
 
     // Listen for enhanced transcript segments
-    unlistenSegmentEnhanced = await listen<{ segment_id: string; enhanced_text: string }>("segment-enhanced", (event) => {
+    unlistenSegmentEnhanced = await listen<{ segment_ids?: string[]; segment_id?: string; enhanced_text: string }>("segment-enhanced", (event) => {
       const data = event.payload;
-      liveEnhancedText = data.enhanced_text;
+      console.log("Segment enhanced:", data);
+      // Handle both old format (segment_id) and new format (segment_ids)
+      if (data.segment_ids) {
+        // New format: semantic reconstruction covering multiple segments
+        liveEnhancedText = data.enhanced_text;
+      } else if (data.segment_id) {
+        // Old format: single segment enhancement
+        liveEnhancedText = data.enhanced_text;
+      }
     });
 
     // Listen for detected questions
     unlistenQuestionDetected = await listen<{ segment_id: string; question: string; answer: string }>("question-detected", (event) => {
       const data = event.payload;
+      console.log("Question detected:", data);
       liveQuestions = [...liveQuestions, {
         id: data.segment_id,
         question: data.question,
@@ -459,6 +506,9 @@
       // Stop AI event listeners
       stopAIEventListeners();
 
+      // Save transcript before stopping
+      const finalTranscript = transcript;
+
       try {
         const result = await invoke<TranscriptSegment[]>("stop_recording");
         // Update with final transcript from backend (includes any remaining segments)
@@ -468,6 +518,24 @@
         }
       } catch (e) {
         console.error("Failed to stop recording:", e);
+      }
+
+      // Generate summary after recording stops
+      if (finalTranscript.length >= 3) {
+        isGeneratingSummary = true;
+        try {
+          const meetingSummary = await invoke<Summary>("generate_summary", {
+            transcript: finalTranscript,
+            language: currentLanguage
+          });
+          summary = meetingSummary;
+          persistentSummary = meetingSummary;
+          showPersistentSummary = true;
+          aiPanelCollapsed = false;
+        } catch (e) {
+          console.error("Failed to generate summary:", e);
+        }
+        isGeneratingSummary = false;
       }
 
       // Refresh meetings list to show updated segment counts
@@ -480,6 +548,13 @@
         answer = "";
         summary = null;
         recordingDuration = 0;
+        showPersistentSummary = false;
+        persistentSummary = null;
+        showSuggestedQuestions = false;
+        suggestedQuestions = [];
+        transcriptPanelCollapsed = false;
+        aiPanelCollapsed = false;
+        aiConversation = [];
 
         // Start listening for transcription events BEFORE starting recording
         await startTranscriptionListener();
@@ -525,11 +600,14 @@
 
   async function askQuestion() {
     if (!question.trim() || isAsking) return;
+    const q = question.trim();
     isAsking = true;
     answer = "";
 
     try {
-      answer = await invoke<string>("ask_question", { question, meetingId: isRecording ? null : meetingsStore.activeMeetingId });
+      answer = await invoke<string>("ask_question", { question: q, meetingId: isRecording ? null : meetingsStore.activeMeetingId });
+      // Add to conversation history
+      aiConversation = [...aiConversation, { question: q, answer }];
     } catch (e) {
       answer = `Error: ${e}`;
     }
@@ -636,6 +714,47 @@
     embeddingImporting = false;
   }
 
+  // Toggle transcript panel (minimize/maximize)
+  function toggleTranscriptPanel() {
+    transcriptPanelCollapsed = !transcriptPanelCollapsed;
+  }
+
+  // Toggle AI panel (minimize/maximize)
+  function toggleAIPanel() {
+    aiPanelCollapsed = !aiPanelCollapsed;
+  }
+
+  // Generate suggested questions based on transcript
+  async function generateSuggestedQuestions() {
+    if (transcript.length < 3) return;
+    
+    try {
+      const recentText = transcript.slice(-10).map(s => s.text).join(" ");
+      const suggestions = await invoke<string[]>("generate_suggested_questions", { 
+        transcriptContext: recentText 
+      });
+      suggestedQuestions = suggestions;
+      showSuggestedQuestions = true;
+    } catch (e) {
+      console.error("Failed to generate suggestions:", e);
+      // Fallback suggestions
+      suggestedQuestions = [
+        "What are the key points discussed?",
+        "What decisions were made?",
+        "What are the action items?",
+        "What was discussed about [topic]?"
+      ];
+      showSuggestedQuestions = true;
+    }
+  }
+
+  // Ask a suggested question
+  function askSuggestedQuestion(q: string) {
+    question = q;
+    showSuggestedQuestions = false;
+    askQuestion();
+  }
+
   async function askPhomy() {
     if (!phomyQuestion.trim() || phomyIsAsking) return;
     const q = phomyQuestion.trim();
@@ -652,16 +771,39 @@
       const refs = await meetingsStore.semanticSearch(q, undefined, 10);
       phomyReferences = refs;
 
-      // Use Phomy intelligent routing
+      // Use Phomy to answer questions (web search fallback is built-in)
       const ans = await invoke<string>("phomy_ask", { question: q });
       phomyAnswer = ans;
       phomyHistory = [...phomyHistory, { role: 'assistant', text: ans, refs }];
+      
+      // Auto-scroll to bottom
+      setTimeout(() => {
+        if (phomyChatContainer) {
+          phomyChatContainer.scrollTop = phomyChatContainer.scrollHeight;
+        }
+      }, 50);
     } catch (e) {
       const errMsg = `Error: ${e}`;
       phomyAnswer = errMsg;
       phomyHistory = [...phomyHistory, { role: 'assistant', text: errMsg }];
+      
+      // Auto-scroll to bottom on error too
+      setTimeout(() => {
+        if (phomyChatContainer) {
+          phomyChatContainer.scrollTop = phomyChatContainer.scrollHeight;
+        }
+      }, 50);
     }
     phomyIsAsking = false;
+  }
+
+  function toggleRefs(index: number) {
+    if (expandedRefs.has(index)) {
+      expandedRefs.delete(index);
+    } else {
+      expandedRefs.add(index);
+    }
+    expandedRefs = new Set(expandedRefs);
   }
 
   async function expandPhomyContext() {
@@ -1032,132 +1174,217 @@
                 <HomeMetrics />
               </div>
             </div>
-          {:else if isRecording}
-            <!-- LIVE RECORDING VIEW -->
-            <div class="flex-1 flex flex-col p-6 overflow-hidden">
-              <!-- Live AI Insights Panel -->
-              {#if liveEnhancedText || liveQuestions.length > 0}
-                <div class="mb-4 p-4 bg-phantom-ear-surface rounded-lg border border-phantom-ear-accent/30">
-                  <h3 class="text-sm font-medium text-phantom-ear-accent mb-3 flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          {:else if showSplitPanel}
+            <!-- LIVE RECORDING VIEW - Split Panel -->
+            <div class="flex-1 flex gap-4 p-6 overflow-hidden">
+              <!-- Left Panel: Transcript -->
+              <div class="flex-1 flex flex-col min-w-0 {transcriptPanelCollapsed ? 'w-12' : ''} transition-all duration-300">
+                <!-- Panel Header -->
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    Live AI Insights
-                  </h3>
-                  
-                  <!-- Enhanced Transcript -->
-                  {#if liveEnhancedText}
-                    <div class="mb-3 p-3 bg-phantom-ear-bg rounded-lg">
-                      <span class="text-[11px] text-phantom-ear-text-muted uppercase tracking-wide">Enhanced</span>
-                      <p class="text-sm text-phantom-ear-text mt-1">{liveEnhancedText}</p>
-                    </div>
-                  {/if}
-                  
-                  <!-- Detected Questions & Answers -->
-                  {#if liveQuestions.length > 0}
-                    <div class="space-y-2 max-h-40 overflow-y-auto">
-                      {#each liveQuestions.slice(-3) as qa (qa.id)}
-                        <div class="p-3 bg-phantom-ear-bg rounded-lg">
-                          <div class="flex items-start gap-2">
-                            <span class="text-phantom-ear-accent text-lg leading-none">?</span>
-                            <div>
-                              <p class="text-sm text-phantom-ear-text font-medium">{qa.question}</p>
-                              <p class="text-sm text-phantom-ear-text-muted mt-1">{qa.answer}</p>
-                            </div>
-                          </div>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
+                    <h2 class="text-sm font-medium text-phantom-ear-text uppercase tracking-wide">Transcript</h2>
+                    {#if isRecording}
+                      <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-accent/20 text-phantom-ear-accent animate-pulse">Recording</span>
+                    {:else if showPersistentSummary}
+                      <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-purple/20 text-phantom-ear-purple">Completed</span>
+                    {/if}
+                    <span class="text-xs text-phantom-ear-text-muted">({transcript.length})</span>
+                  </div>
+                  <button onclick={toggleTranscriptPanel} class="p-1.5 rounded-md hover:bg-phantom-ear-surface text-phantom-ear-text-muted hover:text-phantom-ear-text transition-colors">
+                    {#if transcriptPanelCollapsed}
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                    {:else}
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                    {/if}
+                  </button>
                 </div>
-              {/if}
 
-              <!-- Timeline -->
-              <div class="mb-4">
-                <TranscriptTimeline
-                  segments={transcript}
-                  duration={recordingDuration}
-                  currentPosition={recordingDuration}
-                  isRecording={isRecording}
-                  onSeek={(timestampMs) => {
-                    const targetSec = timestampMs / 1000;
-                    const closestSegment = transcript.reduce((prev, curr) => {
-                      const prevDiff = Math.abs((prev.timestamp_ms || 0) / 1000 - targetSec);
-                      const currDiff = Math.abs((curr.timestamp_ms || 0) / 1000 - targetSec);
-                      return currDiff < prevDiff ? curr : prev;
-                    }, transcript[0]);
-                    if (closestSegment && transcriptContainer) {
-                      const segmentEl = transcriptContainer.querySelector(`[data-segment-id="${closestSegment.id}"]`);
-                      if (segmentEl) {
-                        segmentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        segmentEl.classList.add('bg-phantom-ear-accent/10');
-                        setTimeout(() => segmentEl.classList.remove('bg-phantom-ear-accent/10'), 1500);
+                {#if !transcriptPanelCollapsed}
+                  <!-- Timeline -->
+                  <div class="mb-4">
+                    <TranscriptTimeline segments={transcript} duration={recordingDuration} currentPosition={recordingDuration} isRecording={isRecording} onSeek={(ts) => {
+                      const sec = ts / 1000;
+                      const seg = transcript.reduce((p, c) => Math.abs((c.timestamp_ms || 0) / 1000 - sec) < Math.abs((p.timestamp_ms || 0) / 1000 - sec) ? c : p, transcript[0]);
+                      if (seg && transcriptContainer) {
+                        const el = transcriptContainer.querySelector(`[data-segment-id="${seg.id}"]`);
+                        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('bg-phantom-ear-accent/10'); setTimeout(() => el.classList.remove('bg-phantom-ear-accent/10'), 1500); }
                       }
-                    }
-                  }}
-                />
+                    }} />
+                  </div>
+
+                  <!-- Live Transcript -->
+                  <div class="flex-1 flex flex-col min-h-0">
+                    <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden">
+                      {#if transcript.length === 0}
+                        <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
+                          <p class="text-sm font-medium">Listening...</p>
+                          <p class="text-xs mt-1 opacity-70">Speech will appear here in real-time</p>
+                        </div>
+                      {:else}
+                        <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
+                          {#each transcript as segment (segment.id)}
+                            <div data-segment-id={segment.id} class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-phantom-ear-surface/50 transition-colors">
+                              <span class="text-xs text-phantom-ear-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
+                              <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
               </div>
 
-              <!-- Live Transcript -->
-              <div class="flex-1 flex flex-col min-h-0">
+              <!-- Right Panel: AI -->
+              <div class="flex-1 flex flex-col min-w-0 {aiPanelCollapsed ? 'w-12' : ''} transition-all duration-300">
+                <!-- Panel Header -->
                 <div class="flex items-center justify-between mb-3">
-                  <h2 class="text-sm font-medium text-phantom-ear-text-muted uppercase tracking-wide">Live Transcript</h2>
-                  <span class="text-xs text-phantom-ear-text-muted">{transcript.length} segments</span>
+                  <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-phantom-ear-purple" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <h2 class="text-sm font-medium text-phantom-ear-text uppercase tracking-wide">AI Insights</h2>
+                    {#if isRecording}
+                      <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-accent/20 text-phantom-ear-accent animate-pulse">Live</span>
+                    {:else if showPersistentSummary}
+                      <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-purple/20 text-phantom-ear-purple">Summary</span>
+                    {/if}
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button onclick={toggleAIPanel} class="p-1.5 rounded-md hover:bg-phantom-ear-surface text-phantom-ear-text-muted hover:text-phantom-ear-text transition-colors">
+                      {#if aiPanelCollapsed}
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                      {:else}
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                      {/if}
+                    </button>
+                  </div>
                 </div>
 
-                <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden shadow-glow-surface">
-                  {#if transcript.length === 0}
-                    <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
-                      <p class="text-sm font-medium">Listening...</p>
-                      <p class="text-xs mt-1 opacity-70">Speech will appear here in real-time</p>
-                    </div>
-                  {:else}
-                    <div bind:this={transcriptContainer} class="p-4 space-y-2 overflow-y-auto h-full scroll-smooth">
-                      {#each transcript as segment (segment.id)}
-                        <div data-segment-id={segment.id} class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-phantom-ear-surface/50 transition-colors">
-                          <span class="text-xs text-phantom-ear-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
-                          <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-
-                <!-- Q&A Section (available during live recording) -->
-                {#if transcript.length > 0}
-                  <div class="mt-4 p-4 glass rounded-xl border border-phantom-ear-border">
-                    <div class="flex items-center gap-2 mb-3">
-                      <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Ask About This Recording</h3>
-                    </div>
-                    <form onsubmit={(e) => { e.preventDefault(); askQuestion(); }} class="flex gap-2">
-                      <input
-                        type="text"
-                        bind:value={question}
-                        placeholder="Ask a question about the transcript so far..."
-                        class="flex-1 px-3 py-2 text-sm bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent transition-colors"
-                        disabled={isAsking}
-                      />
-                      <button
-                        type="submit"
-                        disabled={!question.trim() || isAsking}
-                        class="px-4 py-2 bg-gradient-accent rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-all hover-lift"
-                      >
-                        {#if isAsking}
-                          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                          </svg>
-                        {:else}
-                          Ask
+                {#if !aiPanelCollapsed}
+                  <div class="flex-1 flex flex-col min-h-0 overflow-y-auto">
+                    <!-- Live AI Insights -->
+                    {#if liveEnhancedText || liveQuestions.length > 0}
+                      <div class="mb-4 p-4 bg-phantom-ear-surface rounded-lg border border-phantom-ear-accent/30 shrink-0">
+                        <h3 class="text-xs font-medium text-phantom-ear-accent mb-3 flex items-center gap-2 uppercase tracking-wide">
+                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                          Live AI Insights
+                        </h3>
+                        {#if liveEnhancedText}
+                          <div class="mb-3 p-3 bg-phantom-ear-bg rounded-lg">
+                            <span class="text-[10px] text-phantom-ear-text-muted uppercase tracking-wide">Enhanced</span>
+                            <p class="text-sm text-phantom-ear-text mt-1">{liveEnhancedText}</p>
+                          </div>
                         {/if}
-                      </button>
-                    </form>
-                    {#if answer}
-                      <div class="mt-3 p-3 bg-phantom-ear-surface/50 rounded-lg">
-                        <p class="text-sm text-phantom-ear-text leading-relaxed">{answer}</p>
+                        {#if liveQuestions.length > 0}
+                          <div class="space-y-2 max-h-32 overflow-y-auto">
+                            {#each liveQuestions.slice(-3) as qa (qa.id)}
+                              <div class="p-3 bg-phantom-ear-bg rounded-lg">
+                                <div class="flex items-start gap-2">
+                                  <span class="text-phantom-ear-accent text-lg leading-none">?</span>
+                                  <div>
+                                    <p class="text-sm text-phantom-ear-text font-medium">{qa.question}</p>
+                                    <p class="text-sm text-phantom-ear-text-muted mt-1">{qa.answer}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    {/if}
+
+                    <!-- Persistent Summary -->
+                    {#if showPersistentSummary && persistentSummary}
+                      <div class="mb-4 p-4 bg-phantom-ear-surface rounded-lg border border-phantom-ear-purple/30 shrink-0">
+                        <h3 class="text-xs font-medium text-phantom-ear-purple mb-3 flex items-center gap-2 uppercase tracking-wide">
+                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          Meeting Summary
+                        </h3>
+                        {#if persistentSummary.overview}
+                          <div class="text-sm text-phantom-ear-text mt-1 prose prose-invert prose-sm max-w-none">
+                            {@html renderMarkdown(persistentSummary.overview)}
+                          </div>
+                        {/if}
+                        {#if persistentSummary.key_points && persistentSummary.key_points.length > 0}
+                          <div class="mt-3">
+                            <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Key Points</h4>
+                            <ul class="space-y-1">
+                              {#each persistentSummary.key_points as point}
+                                <li class="flex items-start gap-2 text-sm text-phantom-ear-text">
+                                  <span class="text-phantom-ear-accent mt-0.5">&#8226;</span>
+                                  <span>{point}</span>
+                                </li>
+                              {/each}
+                            </ul>
+                          </div>
+                        {/if}
+                        {#if persistentSummary.action_items && persistentSummary.action_items.length > 0}
+                          <div class="mt-3">
+                            <h4 class="text-xs font-semibold text-phantom-ear-text-muted uppercase tracking-wide mb-2">Action Items</h4>
+                            <ul class="space-y-1">
+                              {#each persistentSummary.action_items as item}
+                                <li class="flex items-start gap-2 text-sm text-phantom-ear-text">
+                                  <span class="text-phantom-ear-success mt-0.5">&#10003;</span>
+                                  <span>{item}</span>
+                                </li>
+                              {/each}
+                            </ul>
+                          </div>
+                        {/if}
+                      </div>
+                    {/if}
+
+                    <!-- AI Conversation History -->
+                    {#if aiConversation.length > 0}
+                      <div class="mb-4 space-y-3 shrink-0">
+                        <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Conversation</h3>
+                        {#each aiConversation as conv}
+                          <div class="p-3 bg-phantom-ear-bg rounded-lg">
+                            <p class="text-xs text-phantom-ear-accent font-medium">Q: {conv.question}</p>
+                            <p class="text-sm text-phantom-ear-text mt-1 prose prose-invert prose-sm max-w-none">{@html renderMarkdown(conv.answer)}</p>
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+
+                    <!-- Question Input -->
+                    {#if transcript.length > 0}
+                      <div class="mt-auto p-4 glass rounded-xl border border-phantom-ear-border shrink-0">
+                        <div class="flex items-center gap-2 mb-3">
+                          <svg class="w-4 h-4 text-phantom-ear-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          <h3 class="text-xs font-medium text-phantom-ear-text-muted uppercase tracking-wide">Ask About Recording</h3>
+                        </div>
+                        
+                        {#if !showSuggestedQuestions && transcript.length >= 3}
+                          <button onclick={generateSuggestedQuestions} class="mb-3 px-3 py-1.5 text-xs rounded-lg bg-phantom-ear-purple/20 text-phantom-ear-purple hover:bg-phantom-ear-purple/30 transition-colors flex items-center gap-1.5">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            Get Suggested Questions
+                          </button>
+                        {/if}
+
+                        {#if showSuggestedQuestions && suggestedQuestions.length > 0}
+                          <div class="mb-3 p-3 bg-phantom-ear-bg rounded-lg">
+                            <div class="flex items-center justify-between mb-2">
+                              <span class="text-[10px] text-phantom-ear-purple uppercase">Suggested</span>
+                              <button onclick={() => showSuggestedQuestions = false} class="text-phantom-ear-text-muted hover:text-phantom-ear-text"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                            </div>
+                            <div class="space-y-1.5">
+                              {#each suggestedQuestions as q}<button onclick={() => askSuggestedQuestion(q)} class="w-full text-left p-2 text-xs rounded-lg bg-phantom-ear-surface hover:bg-phantom-ear-accent/10 text-phantom-ear-text">{q}</button>{/each}
+                            </div>
+                          </div>
+                        {/if}
+
+                        <form onsubmit={(e) => { e.preventDefault(); askQuestion(); }} class="flex gap-2">
+                          <input type="text" bind:value={question} placeholder="Ask a question..." class="flex-1 px-3 py-2 text-sm bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-accent" disabled={isAsking} />
+                          <button type="submit" disabled={!question.trim() || isAsking} class="px-4 py-2 bg-gradient-accent rounded-lg text-sm font-medium text-white disabled:opacity-50">
+                            {#if isAsking}<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>{:else}Ask{/if}
+                          </button>
+                        </form>
+                        {#if answer}<div class="mt-3 p-3 bg-phantom-ear-surface/50 rounded-lg"><p class="text-sm text-phantom-ear-text leading-relaxed prose prose-invert prose-sm max-w-none">{@html renderMarkdown(answer)}</p></div>{/if}
                       </div>
                     {/if}
                   </div>
@@ -1376,7 +1603,7 @@
             </div>
 
             <!-- Chat History -->
-            <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-y-auto p-4 space-y-4">
+            <div bind:this={phomyChatContainer} class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-y-auto p-4 space-y-4">
               {#if phomyHistory.length === 0}
                 <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
                   <div class="w-14 h-14 mb-4 rounded-2xl bg-phantom-ear-purple/10 flex items-center justify-center">
@@ -1397,15 +1624,29 @@
                     </div>
                   {:else}
                     <div class="space-y-3">
-                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-phantom-ear-surface border border-phantom-ear-border text-sm text-phantom-ear-text whitespace-pre-wrap">
-                        {msg.text}
+                      <!-- Use @html to render markdown -->
+                      <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-bl-sm bg-phantom-ear-surface border border-phantom-ear-border text-sm text-phantom-ear-text prose prose-invert prose-sm max-w-none">
+                        {@html renderMarkdown(msg.text)}
                       </div>
                       {#if msg.refs && msg.refs.length > 0}
-                        <div class="space-y-2 max-w-[80%]">
-                          <p class="text-xs text-phantom-ear-text-muted uppercase tracking-wide font-medium">References</p>
-                          {#each msg.refs.slice(0, 5) as ref}
-                            <ReferenceCard result={ref} onSelect={handleSelectMeeting} />
-                          {/each}
+                        {@const msgIndex = phomyHistory.indexOf(msg)}
+                        <div class="max-w-[80%]">
+                          <button
+                            onclick={() => toggleRefs(msgIndex)}
+                            class="flex items-center gap-2 text-xs text-phantom-ear-text-muted hover:text-phantom-ear-purple transition-colors"
+                          >
+                            <svg class="w-3 h-3 transition-transform {expandedRefs.has(msgIndex) ? 'rotate-90' : ''}" fill="currentColor" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                            </svg>
+                            {expandedRefs.has(msgIndex) ? 'Hide' : 'Show'} References ({msg.refs.length})
+                          </button>
+                          {#if expandedRefs.has(msgIndex)}
+                            <div class="mt-2 space-y-2">
+                              {#each msg.refs.slice(0, 5) as ref}
+                                <ReferenceCard result={ref} onSelect={handleSelectMeeting} />
+                              {/each}
+                            </div>
+                          {/if}
                         </div>
                       {/if}
                     </div>

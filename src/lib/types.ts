@@ -106,6 +106,7 @@ export interface TranscriptionEvent {
 }
 
 export interface Summary {
+  title?: string;
   overview: string;
   action_items: string[];
   key_points: string[];

@@ -52,9 +52,9 @@
     language: "en",
     asr_backend: "whisper",
     audio_device: null,
-    // AI Features (default off)
-    enhance_transcripts: false,
-    detect_questions: false,
+    // AI Features (default on)
+    enhance_transcripts: true,
+    detect_questions: true,
   });
 
   let asrBackends = $state<BackendInfo[]>([]);
