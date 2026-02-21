@@ -25,8 +25,7 @@
 [**Download**](#-download) • [**Features**](#-features) • [**How It Works**](#-how-it-works) • [**Tech Stack**](#-architecture) • [**Development**](#-development)
 
 <br/>
-
-<img src="https://raw.githubusercontent.com/Phantom-Ear/phantom-ear/main/docs/screenshot.png" alt="PhantomEar Screenshot" width="800"/>
+<img width="1088" height="735" alt="image" src="https://github.com/user-attachments/assets/5feb825d-cf7f-4f3d-a8b1-4c781bb5a391" />
 
 </div>
 
