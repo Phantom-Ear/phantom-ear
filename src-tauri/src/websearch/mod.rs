@@ -1,9 +1,9 @@
 // Web Search module
 // Provides web search capability using DuckDuckGo API
 
-use anyhow::{Result, anyhow};
-use serde::{Deserialize, Serialize};
+use anyhow::{anyhow, Result};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
 pub struct WebSearchClient {
     client: Client,
@@ -30,9 +30,13 @@ impl WebSearchClient {
             urlencoding::encode(query)
         );
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            )
             .send()
             .await?;
 
@@ -47,22 +51,25 @@ impl WebSearchClient {
     /// Parse DuckDuckGo HTML results - simplified version
     fn parse_results(&self, html: &str, max_results: usize) -> Result<Vec<SearchResult>> {
         let mut results = Vec::new();
-        
-        let result_regex = regex::Regex::new(r#"<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]+)</a>"#).unwrap();
-        
+
+        let result_regex = regex::Regex::new(
+            r#"<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]+)</a>"#,
+        )
+        .unwrap();
+
         for cap in result_regex.captures_iter(html) {
             if results.len() >= max_results {
                 break;
             }
-            
+
             let url = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let title = cap.get(2).map(|m| m.as_str()).unwrap_or("");
-            
+
             // Skip DuckDuckGo internal URLs
             if url.contains("duckduckgo.com") || url.is_empty() {
                 continue;
             }
-            
+
             results.push(SearchResult {
                 title: title.to_string(),
                 url: url.to_string(),

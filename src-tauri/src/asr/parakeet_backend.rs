@@ -7,8 +7,8 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ndarray::Array2;
-use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
+use ort::session::Session;
 use ort::session::SessionOutputs;
 use ort::value::Tensor;
 use std::path::{Path, PathBuf};
@@ -73,19 +73,35 @@ impl ParakeetModel {
 
     pub fn download_url(&self) -> &'static str {
         match self {
-            ParakeetModel::Ctc06b => "https://huggingface.co/nvidia/parakeet-ctc-0.6b/resolve/main/model.onnx",
-            ParakeetModel::Ctc11b => "https://huggingface.co/nvidia/parakeet-ctc-1.1b/resolve/main/model.onnx",
-            ParakeetModel::Rnnt06b => "https://huggingface.co/nvidia/parakeet-rnnt-0.6b/resolve/main/model.onnx",
-            ParakeetModel::Rnnt11b => "https://huggingface.co/nvidia/parakeet-rnnt-1.1b/resolve/main/model.onnx",
+            ParakeetModel::Ctc06b => {
+                "https://huggingface.co/nvidia/parakeet-ctc-0.6b/resolve/main/model.onnx"
+            }
+            ParakeetModel::Ctc11b => {
+                "https://huggingface.co/nvidia/parakeet-ctc-1.1b/resolve/main/model.onnx"
+            }
+            ParakeetModel::Rnnt06b => {
+                "https://huggingface.co/nvidia/parakeet-rnnt-0.6b/resolve/main/model.onnx"
+            }
+            ParakeetModel::Rnnt11b => {
+                "https://huggingface.co/nvidia/parakeet-rnnt-1.1b/resolve/main/model.onnx"
+            }
         }
     }
 
     pub fn vocab_url(&self) -> &'static str {
         match self {
-            ParakeetModel::Ctc06b => "https://huggingface.co/nvidia/parakeet-ctc-0.6b/resolve/main/vocab.json",
-            ParakeetModel::Ctc11b => "https://huggingface.co/nvidia/parakeet-ctc-1.1b/resolve/main/vocab.json",
-            ParakeetModel::Rnnt06b => "https://huggingface.co/nvidia/parakeet-rnnt-0.6b/resolve/main/vocab.json",
-            ParakeetModel::Rnnt11b => "https://huggingface.co/nvidia/parakeet-rnnt-1.1b/resolve/main/vocab.json",
+            ParakeetModel::Ctc06b => {
+                "https://huggingface.co/nvidia/parakeet-ctc-0.6b/resolve/main/vocab.json"
+            }
+            ParakeetModel::Ctc11b => {
+                "https://huggingface.co/nvidia/parakeet-ctc-1.1b/resolve/main/vocab.json"
+            }
+            ParakeetModel::Rnnt06b => {
+                "https://huggingface.co/nvidia/parakeet-rnnt-0.6b/resolve/main/vocab.json"
+            }
+            ParakeetModel::Rnnt11b => {
+                "https://huggingface.co/nvidia/parakeet-rnnt-1.1b/resolve/main/vocab.json"
+            }
         }
     }
 }
@@ -149,21 +165,21 @@ impl AsrBackend for ParakeetBackend {
             return Err(anyhow!("Model file not found: {:?}", path));
         }
 
-        let extension = path.extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if extension != "onnx" {
-            return Err(anyhow!("Parakeet requires an ONNX model file (.onnx), got .{}", extension));
+            return Err(anyhow!(
+                "Parakeet requires an ONNX model file (.onnx), got .{}",
+                extension
+            ));
         }
 
         // Load vocabulary from JSON file alongside the model
         let vocab_path = path.with_extension("vocab.json");
         // Also try sibling file with matching name pattern
-        let vocab_path2 = path.parent()
-            .map(|p| {
-                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("model");
-                p.join(format!("{}-vocab.json", stem))
-            });
+        let vocab_path2 = path.parent().map(|p| {
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("model");
+            p.join(format!("{}-vocab.json", stem))
+        });
 
         let vocab = if vocab_path.exists() {
             load_vocab(&vocab_path)?
@@ -212,7 +228,10 @@ impl AsrBackend for ParakeetBackend {
 
     fn set_language(&mut self, lang: &str) {
         if lang != "en" && lang != "auto" {
-            log::warn!("Parakeet only supports English. Ignoring language setting: {}", lang);
+            log::warn!(
+                "Parakeet only supports English. Ignoring language setting: {}",
+                lang
+            );
         }
         self.language = "en".to_string();
     }
@@ -226,9 +245,13 @@ impl AsrBackend for ParakeetBackend {
             return Err(anyhow!("No model loaded"));
         }
 
-        let session_arc = self.session.as_ref()
+        let session_arc = self
+            .session
+            .as_ref()
             .ok_or_else(|| anyhow!("ONNX session not initialized"))?;
-        let vocab = self.vocab.as_ref()
+        let vocab = self
+            .vocab
+            .as_ref()
             .ok_or_else(|| anyhow!("Vocabulary not loaded"))?;
 
         if samples.is_empty() {
@@ -250,11 +273,13 @@ impl AsrBackend for ParakeetBackend {
         }
 
         // Lock session for inference
-        let mut session = session_arc.lock()
+        let mut session = session_arc
+            .lock()
             .map_err(|e| anyhow!("Failed to lock ONNX session: {}", e))?;
 
         // Try mel features first, fall back to raw audio
-        let result = self.run_inference_mel(&mut session, &mel_features, n_mels, n_frames, vocab)
+        let result = self
+            .run_inference_mel(&mut session, &mel_features, n_mels, n_frames, vocab)
             .or_else(|e| {
                 log::warn!("Mel-based inference failed ({}), trying raw audio input", e);
                 self.run_inference_raw(&mut session, samples, vocab)
@@ -286,7 +311,8 @@ impl ParakeetBackend {
             "length" => length_value
         ];
 
-        let outputs = session.run(inputs)
+        let outputs = session
+            .run(inputs)
             .map_err(|e| anyhow!("ONNX inference failed: {}", e))?;
 
         self.decode_ctc_output(&outputs, vocab)
@@ -309,7 +335,8 @@ impl ParakeetBackend {
             "length" => length_value
         ];
 
-        let outputs = session.run(inputs)
+        let outputs = session
+            .run(inputs)
             .map_err(|e| anyhow!("ONNX inference failed: {}", e))?;
 
         self.decode_ctc_output(&outputs, vocab)
@@ -404,8 +431,8 @@ fn samples_to_ms(n_frames: usize, hop_length: usize, sample_rate: usize) -> u64 
 fn load_vocab(path: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| anyhow!("Failed to read vocab file {:?}: {}", path, e))?;
-    let vocab: Vec<String> = serde_json::from_str(&content)
-        .map_err(|e| anyhow!("Failed to parse vocab JSON: {}", e))?;
+    let vocab: Vec<String> =
+        serde_json::from_str(&content).map_err(|e| anyhow!("Failed to parse vocab JSON: {}", e))?;
     Ok(vocab)
 }
 
@@ -416,8 +443,8 @@ fn default_char_vocab() -> Vec<String> {
     for c in 'a'..='z' {
         vocab.push(c.to_string());
     }
-    vocab.push(" ".to_string());  // space
-    vocab.push("'".to_string());  // apostrophe
+    vocab.push(" ".to_string()); // space
+    vocab.push("'".to_string()); // apostrophe
     vocab
 }
 

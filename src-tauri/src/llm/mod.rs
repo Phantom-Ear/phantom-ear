@@ -1,7 +1,7 @@
 // LLM module
 // Interface with OpenAI and Ollama for AI features
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -76,15 +76,22 @@ impl LlmClient {
     pub async fn complete(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
         match &self.provider {
             LlmProvider::OpenAI { api_key } => {
-                self.complete_openai(api_key, system_prompt, user_prompt).await
+                self.complete_openai(api_key, system_prompt, user_prompt)
+                    .await
             }
             LlmProvider::Ollama { url, model } => {
-                self.complete_ollama(url, model, system_prompt, user_prompt).await
+                self.complete_ollama(url, model, system_prompt, user_prompt)
+                    .await
             }
         }
     }
 
-    async fn complete_openai(&self, api_key: &str, system_prompt: &str, user_prompt: &str) -> Result<String> {
+    async fn complete_openai(
+        &self,
+        api_key: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String> {
         let request = OpenAIRequest {
             model: "gpt-4o-mini".to_string(),
             messages: vec![
@@ -100,7 +107,8 @@ impl LlmClient {
             temperature: 0.7,
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", api_key))
             .json(&request)
@@ -114,12 +122,20 @@ impl LlmClient {
         }
 
         let response: OpenAIResponse = response.json().await?;
-        Ok(response.choices.first()
+        Ok(response
+            .choices
+            .first()
             .map(|c| c.message.content.clone())
             .unwrap_or_default())
     }
 
-    async fn complete_ollama(&self, url: &str, model: &str, system_prompt: &str, user_prompt: &str) -> Result<String> {
+    async fn complete_ollama(
+        &self,
+        url: &str,
+        model: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String> {
         let request = OllamaRequest {
             model: model.to_string(),
             messages: vec![
@@ -136,16 +152,16 @@ impl LlmClient {
         };
 
         let api_url = format!("{}/api/chat", url);
-        let response = self.client
-            .post(&api_url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&api_url).json(&request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Ollama API error ({}): {}. Is Ollama running?", status, error_text));
+            return Err(anyhow!(
+                "Ollama API error ({}): {}. Is Ollama running?",
+                status,
+                error_text
+            ));
         }
 
         let response: OllamaResponse = response.json().await?;
@@ -156,7 +172,10 @@ impl LlmClient {
     pub async fn summarize(&self, transcript: &str) -> Result<String> {
         let system = "You are a helpful assistant that creates concise meeting summaries. \
                       Extract key points, action items, and important decisions.";
-        let user = format!("Please summarize this meeting transcript:\n\n{}", transcript);
+        let user = format!(
+            "Please summarize this meeting transcript:\n\n{}",
+            transcript
+        );
         self.complete(system, &user).await
     }
 
@@ -173,7 +192,10 @@ impl LlmClient {
         let system = "You are a helpful assistant that creates short, descriptive titles for meeting transcripts. \
                       Create a concise title (3-6 words) that captures the main topic or purpose of the meeting. \
                       Just return the title, nothing else.";
-        let user = format!("Based on this transcript, create a short title:\n\n{}", transcript);
+        let user = format!(
+            "Based on this transcript, create a short title:\n\n{}",
+            transcript
+        );
         self.complete(system, &user).await
     }
 
@@ -183,12 +205,12 @@ impl LlmClient {
                       Return ONLY a JSON array like [\"Q1?\", \"Q2?\", \"Q3?\"]. No other text.";
         let user = format!("What questions would be useful?\n\n{}", transcript);
         let response = self.complete(system, &user).await?;
-        
+
         // Try to parse JSON, fallback to default questions
         if let Ok(questions) = serde_json::from_str::<Vec<String>>(&response) {
             return Ok(questions);
         }
-        
+
         // Try to extract JSON from response
         if let Some(start) = response.find('[') {
             if let Some(end) = response.rfind(']') {
@@ -198,7 +220,7 @@ impl LlmClient {
                 }
             }
         }
-        
+
         // Fallback
         Ok(vec![
             "What are the key points discussed?".to_string(),
@@ -208,7 +230,12 @@ impl LlmClient {
     }
 
     /// Enhance a transcript segment with context from surrounding segments
-    pub async fn enhance_segment(&self, prev_text: Option<&str>, current_text: &str, next_text: Option<&str>) -> Result<String> {
+    pub async fn enhance_segment(
+        &self,
+        prev_text: Option<&str>,
+        current_text: &str,
+        next_text: Option<&str>,
+    ) -> Result<String> {
         let mut context = String::new();
         if let Some(prev) = prev_text {
             context.push_str(&format!("Previous segment: {}\n", prev));
@@ -233,7 +260,8 @@ impl LlmClient {
         }
 
         // Join all segments to form a continuous transcript
-        let transcript = segments.iter()
+        let transcript = segments
+            .iter()
             .enumerate()
             .map(|(i, s)| format!("Segment {}: {}", i + 1, s))
             .collect::<Vec<_>>()
@@ -252,10 +280,13 @@ impl LlmClient {
                       
                       Return the rewritten transcript as a single coherent piece. 
                       Return ONLY the enhanced text, nothing else.";
-        let user = format!("Rewrite these transcript segments into a coherent piece:\n\n{}", transcript);
-        
+        let user = format!(
+            "Rewrite these transcript segments into a coherent piece:\n\n{}",
+            transcript
+        );
+
         let result = self.complete(system, &user).await?;
-        
+
         // Return as a single element - the coherent reconstruction
         Ok(vec![result.trim().to_string()])
     }
@@ -275,21 +306,24 @@ impl LlmClient {
         let system = "You are a helpful assistant that analyzes meeting transcripts. \
                       Extract structured metadata and return it as JSON. \
                       Return ONLY valid JSON with no additional text.";
-        
+
         let json_example = r#"{"topics": ["topic1"], "action_items": [], "decisions": [], "participant_count_estimate": 3}"#;
         let user = format!(
             "Analyze this meeting transcript and extract metadata as JSON with this structure: {}\nTranscript:\n{}",
             json_example,
             transcript
         );
-        
+
         let result = self.complete(system, &user).await?;
-        
+
         // Parse JSON from result
         let json_str = result.trim();
         // Handle potential markdown code blocks
-        let json_str = json_str.trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```");
-        
+        let json_str = json_str
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```");
+
         serde_json::from_str(json_str)
             .map_err(|e| anyhow!("Failed to parse metadata JSON: {} - raw: {}", e, json_str))
     }

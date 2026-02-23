@@ -1,8 +1,8 @@
 // PhantomEar - Privacy-first desktop meeting assistant
 // Main library entry point
 
-pub mod audio;
 pub mod asr;
+pub mod audio;
 pub mod commands;
 pub mod detection;
 pub mod embeddings;
@@ -15,13 +15,13 @@ pub mod websearch;
 
 use commands::{AppState, Settings};
 use detection::MeetingDetector;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use storage::Database;
 use tauri::{
-    Emitter, Manager, RunEvent, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, RunEvent, WindowEvent,
 };
 use tokio::sync::Mutex;
 
@@ -104,7 +104,9 @@ pub fn run() {
         ])
         .setup(|app| {
             // Get app data directory and create DB synchronously
-            let app_dir = app.path().app_data_dir()
+            let app_dir = app
+                .path()
+                .app_data_dir()
                 .map_err(|e| format!("Failed to get app data dir: {}", e))?;
             std::fs::create_dir_all(&app_dir)?;
 
@@ -117,18 +119,16 @@ pub fn run() {
 
             // Load settings from DB
             let settings = match db.load_settings_json() {
-                Ok(Some(json)) => {
-                    match serde_json::from_str::<Settings>(&json) {
-                        Ok(s) => {
-                            log::info!("Settings loaded from DB");
-                            s
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse settings from DB: {}, using defaults", e);
-                            Settings::default()
-                        }
+                Ok(Some(json)) => match serde_json::from_str::<Settings>(&json) {
+                    Ok(s) => {
+                        log::info!("Settings loaded from DB");
+                        s
                     }
-                }
+                    Err(e) => {
+                        log::warn!("Failed to parse settings from DB: {}, using defaults", e);
+                        Settings::default()
+                    }
+                },
                 _ => {
                     log::info!("No settings in DB, using defaults");
                     Settings::default()
@@ -154,13 +154,16 @@ pub fn run() {
 
             // Auto-start meeting detection if enabled in settings
             if auto_detect_enabled {
-                log::info!("Auto-detect meetings enabled, will start detection when frontend is ready");
+                log::info!(
+                    "Auto-detect meetings enabled, will start detection when frontend is ready"
+                );
             }
 
             app.manage(state);
 
             // Setup system tray
-            let toggle_item = MenuItem::with_id(app, "toggle", "Start Recording", true, None::<&str>)?;
+            let toggle_item =
+                MenuItem::with_id(app, "toggle", "Start Recording", true, None::<&str>)?;
             let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit PhantomEar", true, None::<&str>)?;
 
@@ -192,7 +195,12 @@ pub fn run() {
                 })
                 .on_tray_icon_event(|tray_icon: &tauri::tray::TrayIcon, event| {
                     // Show window on left click
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
                         if let Some(window) = tray_icon.app_handle().get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
@@ -208,7 +216,12 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             // Handle window close - minimize to tray instead of quitting
-            if let RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } = event {
+            if let RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::CloseRequested { api, .. },
+                ..
+            } = event
+            {
                 if label == "main" {
                     // Prevent the window from being destroyed
                     api.prevent_close();

@@ -54,7 +54,9 @@ impl DeviceSpecs {
         // CPU info
         let cpu_cores = num_cpus::get_physical();
         let cpu_threads = num_cpus::get();
-        let cpu_name = sys.cpus().first()
+        let cpu_name = sys
+            .cpus()
+            .first()
             .map(|cpu| cpu.brand().to_string())
             .unwrap_or_else(|| "Unknown CPU".to_string());
 
@@ -88,11 +90,11 @@ impl DeviceSpecs {
 
     fn detect_apple_silicon(cpu_name: &str) -> bool {
         let name_lower = cpu_name.to_lowercase();
-        name_lower.contains("apple m") ||
-        name_lower.contains("apple m1") ||
-        name_lower.contains("apple m2") ||
-        name_lower.contains("apple m3") ||
-        name_lower.contains("apple m4")
+        name_lower.contains("apple m")
+            || name_lower.contains("apple m1")
+            || name_lower.contains("apple m2")
+            || name_lower.contains("apple m3")
+            || name_lower.contains("apple m4")
     }
 
     fn detect_gpu(is_apple_silicon: bool) -> (bool, Option<String>) {
@@ -107,7 +109,7 @@ impl DeviceSpecs {
         #[cfg(target_os = "macos")]
         {
             // On macOS, even Intel Macs have integrated GPUs
-            return (true, Some("Integrated GPU".to_string()));
+            (true, Some("Integrated GPU".to_string()))
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -125,7 +127,7 @@ impl ModelRecommendation {
 
         // Define model requirements
         let models = [
-            ("tiny", 75, 2.0, 2),      // (name, size_mb, min_ram_gb, min_cores)
+            ("tiny", 75, 2.0, 2), // (name, size_mb, min_ram_gb, min_cores)
             ("base", 142, 4.0, 2),
             ("small", 466, 6.0, 4),
             ("medium", 1500, 10.0, 6),
@@ -166,19 +168,25 @@ impl ModelRecommendation {
         // Generate recommendation reason and speed
         match recommended.as_str() {
             "large" => {
-                reason = "Your system has excellent specs - large model will give the best accuracy".to_string();
+                reason =
+                    "Your system has excellent specs - large model will give the best accuracy"
+                        .to_string();
                 speed = 2;
             }
             "medium" => {
-                reason = "Your system can handle the medium model for great accuracy with good speed".to_string();
+                reason =
+                    "Your system can handle the medium model for great accuracy with good speed"
+                        .to_string();
                 speed = 3;
             }
             "small" => {
-                reason = "Small model offers a good balance of accuracy and speed for your system".to_string();
+                reason = "Small model offers a good balance of accuracy and speed for your system"
+                    .to_string();
                 speed = 4;
             }
             "base" => {
-                reason = "Base model recommended - good accuracy with fast real-time performance".to_string();
+                reason = "Base model recommended - good accuracy with fast real-time performance"
+                    .to_string();
                 speed = 5;
             }
             "tiny" => {

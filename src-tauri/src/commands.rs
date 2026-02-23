@@ -1,21 +1,27 @@
 // Tauri IPC commands - bridge between frontend and Rust backend
+#![allow(
+    clippy::wildcard_in_or_patterns,
+    clippy::needless_borrows_for_generic_args
+)]
 
-use crate::asr::{self, TranscriptionEngine, WhisperModel};
-#[cfg(feature = "parakeet")]
-use crate::asr::AsrBackendType;
 #[cfg(feature = "parakeet")]
 use crate::asr::parakeet_backend::ParakeetModel;
+#[cfg(feature = "parakeet")]
+use crate::asr::AsrBackendType;
+use crate::asr::{self, TranscriptionEngine, WhisperModel};
 use crate::audio::AudioCapture;
 use crate::detection::MeetingDetector;
 use crate::embeddings::{self, EmbeddingModel};
 use crate::llm::{LlmClient, LlmProvider};
 use crate::models::{self, ModelInfo};
-use crate::storage::{Database, MeetingListItem, SearchResult, SemanticSearchResult, SegmentRow, Speaker};
+use crate::storage::{
+    Database, MeetingListItem, SearchResult, SegmentRow, SemanticSearchResult, Speaker,
+};
 use crate::transcription::TranscriptionConfig;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
@@ -170,15 +176,15 @@ fn format_time(ms: u64) -> String {
 /// Format meeting title from current time
 fn format_meeting_title() -> String {
     let now = Utc::now();
-    now.format("%a %d/%m/%y \u{00b7} %l:%M %p").to_string().trim().to_string()
+    now.format("%a %d/%m/%y \u{00b7} %l:%M %p")
+        .to_string()
+        .trim()
+        .to_string()
 }
 
 /// Start audio recording and transcription
 #[tauri::command]
-pub async fn start_recording(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let mut is_recording = state.is_recording.lock().await;
     if *is_recording {
         return Err("Already recording".to_string());
@@ -188,24 +194,28 @@ pub async fn start_recording(
     {
         let engine = state.transcription_engine.lock().await;
         if engine.is_none() {
-            return Err("Transcription model not loaded. Please download a model first.".to_string());
+            return Err(
+                "Transcription model not loaded. Please download a model first.".to_string(),
+            );
         }
     }
 
     // Initialize audio capture with selected device from settings
-    let mut audio_capture = AudioCapture::new()
-        .map_err(|e| format!("Failed to initialize audio: {}", e))?;
+    let mut audio_capture =
+        AudioCapture::new().map_err(|e| format!("Failed to initialize audio: {}", e))?;
 
     // Apply selected audio device if configured
     {
         let settings = state.settings.lock().await;
         if let Some(ref device_name) = settings.audio_device {
-            audio_capture.select_device(Some(device_name.as_str()))
+            audio_capture
+                .select_device(Some(device_name.as_str()))
                 .map_err(|e| format!("Failed to select audio device '{}': {}", device_name, e))?;
         }
     }
 
-    audio_capture.start()
+    audio_capture
+        .start()
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
     // Create meeting in DB
@@ -213,7 +223,9 @@ pub async fn start_recording(
     let title = format_meeting_title();
     let created_at = Utc::now().to_rfc3339();
 
-    state.db.create_meeting(&meeting_id, &title, &created_at)
+    state
+        .db
+        .create_meeting(&meeting_id, &title, &created_at)
         .map_err(|e| format!("Failed to create meeting: {}", e))?;
 
     *state.active_meeting_id.lock().await = Some(meeting_id.clone());
@@ -251,7 +263,8 @@ pub async fn start_recording(
             emb_model_arc,
             meeting_title,
             settings_arc,
-        ).await;
+        )
+        .await;
     });
 
     log::info!("Recording started with meeting {}", meeting_id);
@@ -259,6 +272,7 @@ pub async fn start_recording(
 }
 
 /// Transcription loop that also stores segments
+#[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 async fn run_transcription_loop_with_storage(
     app: AppHandle,
     audio_capture: Arc<Mutex<Option<AudioCapture>>>,
@@ -282,7 +296,10 @@ async fn run_transcription_loop_with_storage(
     let mut segment_counter: u64 = 0;
     let mut total_duration_ms: i64 = 0;
 
-    log::info!("Transcription loop started, chunk size: {} samples", chunk_samples);
+    log::info!(
+        "Transcription loop started, chunk size: {} samples",
+        chunk_samples
+    );
 
     loop {
         // Check if still recording
@@ -410,12 +427,19 @@ async fn run_transcription_loop_with_storage(
                                         let model_guard = emb_model.lock().await;
                                         if let Some(ref m) = *model_guard {
                                             let enriched = embeddings::enrich_segment(
-                                                &emb_title, &time_label_for_emb, &text_for_emb,
+                                                &emb_title,
+                                                &time_label_for_emb,
+                                                &text_for_emb,
                                             );
                                             match m.embed(&enriched) {
                                                 Ok(emb) => {
-                                                    if let Err(e) = emb_db.insert_embedding(&seg_id_for_emb, &emb) {
-                                                        log::error!("Failed to store embedding: {}", e);
+                                                    if let Err(e) = emb_db
+                                                        .insert_embedding(&seg_id_for_emb, &emb)
+                                                    {
+                                                        log::error!(
+                                                            "Failed to store embedding: {}",
+                                                            e
+                                                        );
                                                     }
                                                 }
                                                 Err(e) => {
@@ -437,22 +461,31 @@ async fn run_transcription_loop_with_storage(
                                     let settings = settings_for_ai.lock().await;
                                     let enhance_transcripts = settings.enhance_transcripts;
                                     let detect_questions = settings.detect_questions;
-                                    
-                                    log::info!("AI Processing check - enhance: {}, detect_questions: {}", enhance_transcripts, detect_questions);
+
+                                    log::info!(
+                                        "AI Processing check - enhance: {}, detect_questions: {}",
+                                        enhance_transcripts,
+                                        detect_questions
+                                    );
                                     drop(settings);
 
                                     // Build LLM client
                                     let llm_provider = {
                                         let settings = settings_for_ai.lock().await;
                                         match settings.llm_provider.as_str() {
-                                            "openai" => {
-                                                if let Some(key) = settings.openai_api_key.clone() {
-                                                    Some(LlmProvider::OpenAI { api_key: key })
-                                                } else { None }
-                                            }
+                                            "openai" => settings
+                                                .openai_api_key
+                                                .clone()
+                                                .map(|key| LlmProvider::OpenAI { api_key: key }),
                                             _ => {
-                                                let url = settings.ollama_url.clone().unwrap_or_else(|| "http://localhost:11434".to_string());
-                                                let model = settings.ollama_model.clone().unwrap_or_else(|| "llama3.2".to_string());
+                                                let url =
+                                                    settings.ollama_url.clone().unwrap_or_else(
+                                                        || "http://localhost:11434".to_string(),
+                                                    );
+                                                let model = settings
+                                                    .ollama_model
+                                                    .clone()
+                                                    .unwrap_or_else(|| "llama3.2".to_string());
                                                 Some(LlmProvider::Ollama { url, model })
                                             }
                                         }
@@ -464,57 +497,88 @@ async fn run_transcription_loop_with_storage(
                                         // Auto-title after 10 segments
                                         if current_seg_counter >= 10 {
                                             let transcript = transcript_for_ai.lock().await;
-                                            let title_transcript: String = transcript.iter().take(10).map(|s| s.text.clone()).collect::<Vec<_>>().join(" ");
+                                            let title_transcript: String = transcript
+                                                .iter()
+                                                .take(10)
+                                                .map(|s| s.text.clone())
+                                                .collect::<Vec<_>>()
+                                                .join(" ");
                                             drop(transcript);
 
-                                            if let Ok(title) = client.generate_title(&title_transcript).await {
-                                                let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
+                                            if let Ok(title) =
+                                                client.generate_title(&title_transcript).await
+                                            {
+                                                let title = title
+                                                    .trim()
+                                                    .trim_matches('"')
+                                                    .trim_matches('\'')
+                                                    .to_string();
                                                 if !title.is_empty() {
-                                                    if let Err(e) = db_for_ai.update_meeting_title(&mid_for_ai, &title) {
+                                                    if let Err(e) = db_for_ai
+                                                        .update_meeting_title(&mid_for_ai, &title)
+                                                    {
                                                         log::error!("Failed to auto-update meeting title: {}", e);
                                                     } else {
                                                         log::info!("Auto-title saved: {}", title);
                                                         // Emit proper event with meeting_id and title
-                                                        let _ = app_for_ai.emit("meeting-title-updated", serde_json::json!({
-                                                            "meeting_id": mid_for_ai,
-                                                            "title": title
-                                                        }));
+                                                        let _ = app_for_ai.emit(
+                                                            "meeting-title-updated",
+                                                            serde_json::json!({
+                                                                "meeting_id": mid_for_ai,
+                                                                "title": title
+                                                            }),
+                                                        );
                                                     }
                                                 }
                                             }
                                         }
 
                                         // Transcript enhancement - batch 5 segments together for better context
-                                        if enhance_transcripts && current_seg_counter % 5 == 0 {
+                                        if enhance_transcripts
+                                            && current_seg_counter.is_multiple_of(5)
+                                        {
                                             let transcript = transcript_for_ai.lock().await;
                                             // Get the last 5 segments (or fewer if not enough)
-                                            let start_idx = (current_seg_counter as usize).saturating_sub(5);
-                                            let segments: Vec<String> = transcript[start_idx..current_seg_counter as usize]
+                                            let start_idx =
+                                                (current_seg_counter as usize).saturating_sub(5);
+                                            let segments: Vec<String> = transcript
+                                                [start_idx..current_seg_counter as usize]
                                                 .iter()
                                                 .map(|s| s.text.clone())
                                                 .collect();
-                                            let segment_ids: Vec<String> = (start_idx..current_seg_counter as usize)
+                                            let segment_ids: Vec<String> = (start_idx
+                                                ..current_seg_counter as usize)
                                                 .map(|i| format!("{}-seg-{}", mid_for_ai, i + 1))
                                                 .collect();
                                             drop(transcript);
 
                                             if segments.len() >= 3 {
                                                 // Send batch to LLM for semantic reconstruction
-                                                if let Ok(enhanced_segments) = client.enhance_batch(&segments).await {
+                                                if let Ok(enhanced_segments) =
+                                                    client.enhance_batch(&segments).await
+                                                {
                                                     // The result is a single coherent piece that covers all segments
                                                     // Emit as one combined enhanced text
-                                                    let combined_text = enhanced_segments.join("\n\n");
-                                                    
+                                                    let combined_text =
+                                                        enhanced_segments.join("\n\n");
+
                                                     // Store enhanced text for each segment
                                                     for seg_id in &segment_ids {
-                                                        let _ = db_for_ai.update_segment_enhanced_text(seg_id, Some(&combined_text));
+                                                        let _ = db_for_ai
+                                                            .update_segment_enhanced_text(
+                                                                seg_id,
+                                                                Some(&combined_text),
+                                                            );
                                                     }
-                                                    
+
                                                     // Emit the combined enhanced text
-                                                    let _ = app_for_ai.emit("segment-enhanced", serde_json::json!({
-                                                        "segment_ids": segment_ids,
-                                                        "enhanced_text": combined_text
-                                                    }));
+                                                    let _ = app_for_ai.emit(
+                                                        "segment-enhanced",
+                                                        serde_json::json!({
+                                                            "segment_ids": segment_ids,
+                                                            "enhanced_text": combined_text
+                                                        }),
+                                                    );
                                                     log::info!("Emitted semantic reconstruction for segments {}-{}", 
                                                         segment_ids.first().unwrap_or(&String::new()),
                                                         segment_ids.last().unwrap_or(&String::new()));
@@ -525,31 +589,64 @@ async fn run_transcription_loop_with_storage(
                                         // Question detection - check every segment for questions
                                         if detect_questions {
                                             let transcript = transcript_for_ai.lock().await;
-                                            let idx = (current_seg_counter as usize).saturating_sub(1);
-                                            let curr_text = transcript.get(idx).map(|s| s.text.clone()).unwrap_or_default();
+                                            let idx =
+                                                (current_seg_counter as usize).saturating_sub(1);
+                                            let curr_text = transcript
+                                                .get(idx)
+                                                .map(|s| s.text.clone())
+                                                .unwrap_or_default();
                                             drop(transcript);
 
-                                            log::info!("Checking for question in segment {}", current_seg_counter);
-                                            
-                                            if let Ok(is_question) = client.detect_question(&curr_text).await {
-                                                log::info!("Question detection result: {}", is_question);
+                                            log::info!(
+                                                "Checking for question in segment {}",
+                                                current_seg_counter
+                                            );
+
+                                            if let Ok(is_question) =
+                                                client.detect_question(&curr_text).await
+                                            {
+                                                log::info!(
+                                                    "Question detection result: {}",
+                                                    is_question
+                                                );
                                                 if is_question {
                                                     // Get context for answering
                                                     let transcript = transcript_for_ai.lock().await;
                                                     let ctx_start = idx.saturating_sub(5);
                                                     let ctx_end = (idx + 6).min(transcript.len());
-                                                    let context: String = transcript[ctx_start..ctx_end].iter().map(|s| s.text.clone()).collect::<Vec<_>>().join("\n");
+                                                    let context: String = transcript
+                                                        [ctx_start..ctx_end]
+                                                        .iter()
+                                                        .map(|s| s.text.clone())
+                                                        .collect::<Vec<_>>()
+                                                        .join("\n");
                                                     drop(transcript);
 
-                                                    if let Ok(answer) = client.answer_question(&context, &curr_text).await {
-                                                        let seg_id = format!("{}-seg-{}", mid_for_ai, current_seg_counter);
-                                                        let _ = db_for_ai.update_segment_question(&seg_id, true, Some(&answer));
-                                                        let _ = app_for_ai.emit("question-detected", serde_json::json!({
-                                                            "segment_id": seg_id,
-                                                            "question": curr_text,
-                                                            "answer": answer
-                                                        }));
-                                                        log::info!("Question detected and emitted: {}", curr_text);
+                                                    if let Ok(answer) = client
+                                                        .answer_question(&context, &curr_text)
+                                                        .await
+                                                    {
+                                                        let seg_id = format!(
+                                                            "{}-seg-{}",
+                                                            mid_for_ai, current_seg_counter
+                                                        );
+                                                        let _ = db_for_ai.update_segment_question(
+                                                            &seg_id,
+                                                            true,
+                                                            Some(&answer),
+                                                        );
+                                                        let _ = app_for_ai.emit(
+                                                            "question-detected",
+                                                            serde_json::json!({
+                                                                "segment_id": seg_id,
+                                                                "question": curr_text,
+                                                                "answer": answer
+                                                            }),
+                                                        );
+                                                        log::info!(
+                                                            "Question detected and emitted: {}",
+                                                            curr_text
+                                                        );
                                                     }
                                                 }
                                             }
@@ -594,14 +691,15 @@ async fn run_transcription_loop_with_storage(
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
-    log::info!("Transcription loop ended, processed {} segments", segment_counter);
+    log::info!(
+        "Transcription loop ended, processed {} segments",
+        segment_counter
+    );
 }
 
 /// Stop recording and finalize transcript
 #[tauri::command]
-pub async fn stop_recording(
-    state: State<'_, AppState>,
-) -> Result<Vec<TranscriptSegment>, String> {
+pub async fn stop_recording(state: State<'_, AppState>) -> Result<Vec<TranscriptSegment>, String> {
     let mut is_recording = state.is_recording.lock().await;
     if !*is_recording {
         return Err("Not recording".to_string());
@@ -616,7 +714,9 @@ pub async fn stop_recording(
     // Stop audio capture
     let mut capture_guard = state.audio_capture.lock().await;
     if let Some(ref mut capture) = *capture_guard {
-        capture.stop().map_err(|e| format!("Failed to stop: {}", e))?;
+        capture
+            .stop()
+            .map_err(|e| format!("Failed to stop: {}", e))?;
     }
     *capture_guard = None;
 
@@ -626,7 +726,10 @@ pub async fn stop_recording(
     let meeting_id = state.active_meeting_id.lock().await.clone();
     if let Some(mid) = &meeting_id {
         let ended_at = Utc::now().to_rfc3339();
-        let duration_ms = transcript.last().map(|s| s.timestamp_ms as i64).unwrap_or(0);
+        let duration_ms = transcript
+            .last()
+            .map(|s| s.timestamp_ms as i64)
+            .unwrap_or(0);
         if let Err(e) = state.db.update_meeting_ended(mid, &ended_at, duration_ms) {
             log::error!("Failed to update meeting ended: {}", e);
         }
@@ -635,12 +738,13 @@ pub async fn stop_recording(
     log::info!("Recording stopped, {} segments", transcript.len());
 
     // Auto-generate summary in background (non-blocking)
-    if transcript.len() > 0 {
+    if !transcript.is_empty() {
         if let Some(mid) = &meeting_id {
             let db_clone = state.db.clone();
             let settings_clone = state.settings.clone();
             let mid_clone = mid.clone();
-            let transcript_text: String = transcript.iter()
+            let transcript_text: String = transcript
+                .iter()
                 .map(|s| format!("[{}] {}", s.time, s.text))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -648,16 +752,18 @@ pub async fn stop_recording(
             tauri::async_runtime::spawn(async move {
                 let settings = settings_clone.lock().await;
                 let provider = match settings.llm_provider.as_str() {
-                    "openai" => {
-                        match settings.openai_api_key.clone() {
-                            Some(key) if !key.is_empty() => LlmProvider::OpenAI { api_key: key },
-                            _ => return,
-                        }
-                    }
+                    "openai" => match settings.openai_api_key.clone() {
+                        Some(key) if !key.is_empty() => LlmProvider::OpenAI { api_key: key },
+                        _ => return,
+                    },
                     _ => {
-                        let url = settings.ollama_url.clone()
+                        let url = settings
+                            .ollama_url
+                            .clone()
                             .unwrap_or_else(|| "http://localhost:11434".to_string());
-                        let model = settings.ollama_model.clone()
+                        let model = settings
+                            .ollama_model
+                            .clone()
                             .unwrap_or_else(|| "llama3.2".to_string());
                         LlmProvider::Ollama { url, model }
                     }
@@ -667,10 +773,18 @@ pub async fn stop_recording(
                 let client = LlmClient::new(provider);
 
                 // Auto-generate title first
-                let title_transcript: String = transcript_text.lines().take(10).collect::<Vec<_>>().join(" ");
+                let title_transcript: String = transcript_text
+                    .lines()
+                    .take(10)
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 match client.generate_title(&title_transcript).await {
                     Ok(title) => {
-                        let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
+                        let title = title
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .to_string();
                         if !title.is_empty() {
                             if let Err(e) = db_clone.update_meeting_title(&mid_clone, &title) {
                                 log::error!("Failed to auto-update meeting title: {}", e);
@@ -706,9 +820,7 @@ pub async fn stop_recording(
 
 /// Pause recording (stops transcription but keeps session active)
 #[tauri::command]
-pub async fn pause_recording(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn pause_recording(state: State<'_, AppState>) -> Result<(), String> {
     let is_recording = state.is_recording.lock().await;
     if !*is_recording {
         return Err("Not recording".to_string());
@@ -720,9 +832,7 @@ pub async fn pause_recording(
 
 /// Resume recording after pause
 #[tauri::command]
-pub async fn resume_recording(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn resume_recording(state: State<'_, AppState>) -> Result<(), String> {
     let is_recording = state.is_recording.lock().await;
     if !*is_recording {
         return Err("Not recording".to_string());
@@ -734,9 +844,7 @@ pub async fn resume_recording(
 
 /// Get current transcript segments
 #[tauri::command]
-pub async fn get_transcript(
-    state: State<'_, AppState>,
-) -> Result<Vec<TranscriptSegment>, String> {
+pub async fn get_transcript(state: State<'_, AppState>) -> Result<Vec<TranscriptSegment>, String> {
     let transcript = state.transcript.lock().await.clone();
     Ok(transcript)
 }
@@ -746,10 +854,11 @@ pub async fn get_transcript(
 // ============================================================================
 
 #[tauri::command]
-pub async fn list_meetings(
-    state: State<'_, AppState>,
-) -> Result<Vec<MeetingListItem>, String> {
-    state.db.list_meetings().map_err(|e| format!("DB error: {}", e))
+pub async fn list_meetings(state: State<'_, AppState>) -> Result<Vec<MeetingListItem>, String> {
+    state
+        .db
+        .list_meetings()
+        .map_err(|e| format!("DB error: {}", e))
 }
 
 #[tauri::command]
@@ -757,11 +866,15 @@ pub async fn get_meeting(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<MeetingWithTranscript, String> {
-    let meeting = state.db.get_meeting(&id)
+    let meeting = state
+        .db
+        .get_meeting(&id)
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "Meeting not found".to_string())?;
 
-    let segments = state.db.get_segments(&id)
+    let segments = state
+        .db
+        .get_segments(&id)
         .map_err(|e| format!("DB error: {}", e))?;
 
     let transcript_segments: Vec<TranscriptSegment> = segments
@@ -791,7 +904,9 @@ pub async fn rename_meeting(
     title: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.db.update_meeting_title(&id, &title)
+    state
+        .db
+        .update_meeting_title(&id, &title)
         .map_err(|e| format!("DB error: {}", e))
 }
 
@@ -801,28 +916,30 @@ pub async fn update_meeting_tags(
     tags: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.db.update_meeting_tags(&id, tags.as_deref())
+    state
+        .db
+        .update_meeting_tags(&id, tags.as_deref())
         .map_err(|e| format!("DB error: {}", e))
 }
 
 #[tauri::command]
-pub async fn toggle_pin_meeting(
-    id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let meeting = state.db.get_meeting(&id)
+pub async fn toggle_pin_meeting(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let meeting = state
+        .db
+        .get_meeting(&id)
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "Meeting not found".to_string())?;
-    state.db.set_meeting_pinned(&id, !meeting.pinned)
+    state
+        .db
+        .set_meeting_pinned(&id, !meeting.pinned)
         .map_err(|e| format!("DB error: {}", e))
 }
 
 #[tauri::command]
-pub async fn delete_meeting(
-    id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    state.db.delete_meeting(&id)
+pub async fn delete_meeting(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .db
+        .delete_meeting(&id)
         .map_err(|e| format!("DB error: {}", e))
 }
 
@@ -834,7 +951,9 @@ pub async fn search_meetings(
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
-    state.db.search_transcripts(&query, 50)
+    state
+        .db
+        .search_transcripts(&query, 50)
         .map_err(|e| format!("Search error: {}", e))
 }
 
@@ -844,11 +963,15 @@ pub async fn export_meeting(
     format: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let meeting = state.db.get_meeting(&id)
+    let meeting = state
+        .db
+        .get_meeting(&id)
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "Meeting not found".to_string())?;
 
-    let segments = state.db.get_segments(&id)
+    let segments = state
+        .db
+        .get_segments(&id)
         .map_err(|e| format!("DB error: {}", e))?;
 
     match format.as_str() {
@@ -914,12 +1037,15 @@ pub async fn export_meeting_to_file(
     };
 
     // Get meeting title for default filename
-    let meeting = state.db.get_meeting(&id)
+    let meeting = state
+        .db
+        .get_meeting(&id)
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "Meeting not found".to_string())?;
 
     // Sanitize filename
-    let safe_title = meeting.title
+    let safe_title = meeting
+        .title
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '_')
         .collect::<String>()
@@ -933,9 +1059,10 @@ pub async fn export_meeting_to_file(
 
     // Use Tauri dialog to show Save As
     use tauri_plugin_dialog::DialogExt;
-    let file_path = app.dialog()
+    let file_path = app
+        .dialog()
         .file()
-        .set_file_name(&format!("{}.{}", default_name, extension))
+        .set_file_name(format!("{}.{}", default_name, extension))
         .add_filter(filter_name, &[extension])
         .blocking_save_file();
 
@@ -964,13 +1091,17 @@ pub async fn update_segment(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if let Some(ref new_text) = text {
-        state.db.update_segment_text(&segment_id, new_text)
+        state
+            .db
+            .update_segment_text(&segment_id, new_text)
             .map_err(|e| format!("Failed to update segment text: {}", e))?;
     }
     if speaker_id.is_some() || text.is_some() {
         // Only update speaker if explicitly passed (even if None to clear it)
         if let Some(ref speaker) = speaker_id {
-            state.db.update_segment_speaker(&segment_id, Some(speaker.as_str()))
+            state
+                .db
+                .update_segment_speaker(&segment_id, Some(speaker.as_str()))
                 .map_err(|e| format!("Failed to update segment speaker: {}", e))?;
         }
     }
@@ -979,11 +1110,10 @@ pub async fn update_segment(
 
 /// Delete a segment
 #[tauri::command]
-pub async fn delete_segment(
-    segment_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    state.db.delete_segment(&segment_id)
+pub async fn delete_segment(segment_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .db
+        .delete_segment(&segment_id)
         .map_err(|e| format!("Failed to delete segment: {}", e))
 }
 
@@ -993,10 +1123,10 @@ pub async fn delete_segment(
 
 /// List all speakers
 #[tauri::command]
-pub async fn list_speakers(
-    state: State<'_, AppState>,
-) -> Result<Vec<Speaker>, String> {
-    state.db.list_speakers()
+pub async fn list_speakers(state: State<'_, AppState>) -> Result<Vec<Speaker>, String> {
+    state
+        .db
+        .list_speakers()
         .map_err(|e| format!("Failed to list speakers: {}", e))
 }
 
@@ -1009,7 +1139,9 @@ pub async fn create_speaker(
 ) -> Result<String, String> {
     let id = format!("speaker-{}", Utc::now().timestamp_millis());
     let created_at = Utc::now().to_rfc3339();
-    state.db.create_speaker(&id, &name, &color, &created_at)
+    state
+        .db
+        .create_speaker(&id, &name, &color, &created_at)
         .map_err(|e| format!("Failed to create speaker: {}", e))?;
     Ok(id)
 }
@@ -1022,17 +1154,18 @@ pub async fn update_speaker(
     color: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.db.update_speaker(&id, &name, &color)
+    state
+        .db
+        .update_speaker(&id, &name, &color)
         .map_err(|e| format!("Failed to update speaker: {}", e))
 }
 
 /// Delete a speaker
 #[tauri::command]
-pub async fn delete_speaker(
-    id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    state.db.delete_speaker(&id)
+pub async fn delete_speaker(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .db
+        .delete_speaker(&id)
         .map_err(|e| format!("Failed to delete speaker: {}", e))
 }
 
@@ -1067,13 +1200,17 @@ pub async fn ask_question(
             }
         };
         if let Some(emb) = query_emb {
-            match state.db.search_semantic(&emb, limit, effective_meeting_id.as_deref()) {
-                Ok(results) if !results.is_empty() => {
-                    Some(results.iter()
+            match state
+                .db
+                .search_semantic(&emb, limit, effective_meeting_id.as_deref())
+            {
+                Ok(results) if !results.is_empty() => Some(
+                    results
+                        .iter()
                         .map(|r| format!("[{}] {}", r.time_label, r.text))
                         .collect::<Vec<_>>()
-                        .join("\n"))
-                }
+                        .join("\n"),
+                ),
                 _ => None,
             }
         } else {
@@ -1085,12 +1222,15 @@ pub async fn ask_question(
     let context: String = if let Some(ctx) = semantic_context {
         ctx
     } else if let Some(ref mid) = meeting_id {
-        let segments = state.db.get_segments(mid)
+        let segments = state
+            .db
+            .get_segments(mid)
             .map_err(|e| format!("DB error: {}", e))?;
         if segments.is_empty() {
             return Err("No transcript available for this meeting".to_string());
         }
-        segments.iter()
+        segments
+            .iter()
             .map(|s| format!("[{}] {}", s.time_label, s.text))
             .collect::<Vec<_>>()
             .join("\n")
@@ -1099,7 +1239,8 @@ pub async fn ask_question(
         if transcript.is_empty() {
             return Err("No transcript available".to_string());
         }
-        transcript.iter()
+        transcript
+            .iter()
             .map(|s| format!("[{}] {}", s.time, s.text))
             .collect::<Vec<_>>()
             .join("\n")
@@ -1109,17 +1250,25 @@ pub async fn ask_question(
     let settings = state.settings.lock().await;
     let provider = match settings.llm_provider.as_str() {
         "openai" => {
-            let api_key = settings.openai_api_key.clone()
+            let api_key = settings
+                .openai_api_key
+                .clone()
                 .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
             if api_key.is_empty() {
-                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+                return Err(
+                    "OpenAI API key is empty. Please add your API key in Settings.".to_string(),
+                );
             }
             LlmProvider::OpenAI { api_key }
         }
         "ollama" | _ => {
-            let url = settings.ollama_url.clone()
+            let url = settings
+                .ollama_url
+                .clone()
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
-            let model = settings.ollama_model.clone()
+            let model = settings
+                .ollama_model
+                .clone()
                 .unwrap_or_else(|| "llama3.2".to_string());
             LlmProvider::Ollama { url, model }
         }
@@ -1129,7 +1278,8 @@ pub async fn ask_question(
     let client = LlmClient::new(provider);
     log::info!("Asking question: {}", question);
 
-    client.answer_question(&context, &question)
+    client
+        .answer_question(&context, &question)
         .await
         .map_err(|e| format!("LLM error: {}", e))
 }
@@ -1137,15 +1287,11 @@ pub async fn ask_question(
 /// Phomy: intelligent assistant that routes queries appropriately
 /// Handles recency, time-based, meeting recall, and global summary queries
 #[tauri::command]
-pub async fn phomy_ask(
-    question: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<String, String> {
     // Helper to get display text (prefer enhanced text when available)
-    let get_display_text = |s: &SegmentRow| -> String {
-        s.enhanced_text.as_ref().unwrap_or(&s.text).clone()
-    };
-    
+    let _get_display_text =
+        |s: &SegmentRow| -> String { s.enhanced_text.as_ref().unwrap_or(&s.text).clone() };
+
     let q = question.to_lowercase();
 
     // Build LLM client from settings
@@ -1153,17 +1299,25 @@ pub async fn phomy_ask(
         let settings = state.settings.lock().await;
         match settings.llm_provider.as_str() {
             "openai" => {
-                let api_key = settings.openai_api_key.clone()
+                let api_key = settings
+                    .openai_api_key
+                    .clone()
                     .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
                 if api_key.is_empty() {
-                    return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+                    return Err(
+                        "OpenAI API key is empty. Please add your API key in Settings.".to_string(),
+                    );
                 }
                 LlmProvider::OpenAI { api_key }
             }
             _ => {
-                let url = settings.ollama_url.clone()
+                let url = settings
+                    .ollama_url
+                    .clone()
                     .unwrap_or_else(|| "http://localhost:11434".to_string());
-                let model = settings.ollama_model.clone()
+                let model = settings
+                    .ollama_model
+                    .clone()
                     .unwrap_or_else(|| "llama3.2".to_string());
                 LlmProvider::Ollama { url, model }
             }
@@ -1172,9 +1326,12 @@ pub async fn phomy_ask(
     let client = LlmClient::new(provider);
 
     // ---- Route 1: "What did they just say?" / recency queries ----
-    let is_recency = q.contains("just said") || q.contains("just say")
-        || q.contains("they just") || q.contains("last thing")
-        || q.contains("just now") || q.contains("right now")
+    let is_recency = q.contains("just said")
+        || q.contains("just say")
+        || q.contains("they just")
+        || q.contains("last thing")
+        || q.contains("just now")
+        || q.contains("right now")
         || (q.contains("what") && q.contains("just"));
 
     if is_recency {
@@ -1185,15 +1342,32 @@ pub async fn phomy_ask(
 
             if is_recording {
                 let transcript = state.transcript.lock().await;
-                let recent: Vec<_> = transcript.iter().rev().take(10).collect::<Vec<_>>().into_iter().rev().collect();
-                recent.iter().map(|s| format!("[{}] {}", s.time, s.text)).collect::<Vec<_>>().join("\n")
+                let recent: Vec<_> = transcript
+                    .iter()
+                    .rev()
+                    .take(10)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                recent
+                    .iter()
+                    .map(|s| format!("[{}] {}", s.time, s.text))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             } else if let Some(mid) = active_mid {
-                let segs = state.db.get_last_segments(&mid, 10).map_err(|e| format!("DB error: {}", e))?;
+                let segs = state
+                    .db
+                    .get_last_segments(&mid, 10)
+                    .map_err(|e| format!("DB error: {}", e))?;
                 // Use enhanced text when available
-                segs.iter().map(|s| {
-                    let text = s.enhanced_text.as_ref().unwrap_or(&s.text);
-                    format!("[{}] {}", s.time_label, text)
-                }).collect::<Vec<_>>().join("\n")
+                segs.iter()
+                    .map(|s| {
+                        let text = s.enhanced_text.as_ref().unwrap_or(&s.text);
+                        format!("[{}] {}", s.time_label, text)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
             } else {
                 return Err("No active meeting to reference.".to_string());
             }
@@ -1205,7 +1379,10 @@ pub async fn phomy_ask(
 
         let system = "You are Phomy, a calm meeting assistant. Summarize what was just said based on the most recent transcript chunks. Be brief and direct.";
         let user = format!("Recent transcript:\n{}\n\nQuestion: {}", context, question);
-        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+        return client
+            .complete(system, &user)
+            .await
+            .map_err(|e| format!("LLM error: {}", e));
     }
 
     // ---- Route 2: Time-based queries ("last 5 minutes", "past 10 minutes") ----
@@ -1219,19 +1396,32 @@ pub async fn phomy_ask(
                 let transcript = state.transcript.lock().await;
                 if let Some(latest) = transcript.last() {
                     let cutoff = (latest.timestamp_ms as i64) - (mins * 60 * 1000);
-                    let filtered: Vec<_> = transcript.iter()
+                    let filtered: Vec<_> = transcript
+                        .iter()
                         .filter(|s| s.timestamp_ms as i64 >= cutoff)
                         .collect();
-                    filtered.iter().map(|s| format!("[{}] {}", s.time, s.text)).collect::<Vec<_>>().join("\n")
+                    filtered
+                        .iter()
+                        .map(|s| format!("[{}] {}", s.time, s.text))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 } else {
                     String::new()
                 }
             } else if let Some(mid) = active_mid {
-                let segs = state.db.get_segments(&mid).map_err(|e| format!("DB error: {}", e))?;
+                let segs = state
+                    .db
+                    .get_segments(&mid)
+                    .map_err(|e| format!("DB error: {}", e))?;
                 if let Some(latest) = segs.last() {
                     let cutoff = latest.timestamp_ms - (mins * 60 * 1000);
-                    let filtered: Vec<_> = segs.iter().filter(|s| s.timestamp_ms >= cutoff).collect();
-                    filtered.iter().map(|s| format!("[{}] {}", s.time_label, s.text)).collect::<Vec<_>>().join("\n")
+                    let filtered: Vec<_> =
+                        segs.iter().filter(|s| s.timestamp_ms >= cutoff).collect();
+                    filtered
+                        .iter()
+                        .map(|s| format!("[{}] {}", s.time_label, s.text))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 } else {
                     String::new()
                 }
@@ -1245,16 +1435,25 @@ pub async fn phomy_ask(
         }
 
         let system = "You are Phomy, a calm meeting assistant. Summarize the transcript from the requested time window. Be concise.";
-        let user = format!("Transcript from the last {} minutes:\n{}\n\nQuestion: {}", mins, context, question);
-        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+        let user = format!(
+            "Transcript from the last {} minutes:\n{}\n\nQuestion: {}",
+            mins, context, question
+        );
+        return client
+            .complete(system, &user)
+            .await
+            .map_err(|e| format!("LLM error: {}", e));
     }
 
     // ---- Route 3: Meeting recall ("last meeting", "previous meeting") ----
-    let is_recall = q.contains("last meeting") || q.contains("previous meeting")
+    let is_recall = q.contains("last meeting")
+        || q.contains("previous meeting")
         || q.contains("most recent meeting");
 
     if is_recall {
-        let meetings = state.db.get_recent_meetings_with_summaries(1)
+        let meetings = state
+            .db
+            .get_recent_meetings_with_summaries(1)
             .map_err(|e| format!("DB error: {}", e))?;
 
         if meetings.is_empty() {
@@ -1266,43 +1465,68 @@ pub async fn phomy_ask(
             format!("Meeting: {} ({})\nSummary:\n{}", title, created_at, s)
         } else {
             // Fall back to transcript chunks
-            let segs = state.db.get_segments(mid).map_err(|e| format!("DB error: {}", e))?;
-            let transcript: String = segs.iter()
+            let segs = state
+                .db
+                .get_segments(mid)
+                .map_err(|e| format!("DB error: {}", e))?;
+            let transcript: String = segs
+                .iter()
                 .map(|s| format!("[{}] {}", s.time_label, s.text))
                 .collect::<Vec<_>>()
                 .join("\n");
-            format!("Meeting: {} ({})\nTranscript:\n{}", title, created_at, transcript)
+            format!(
+                "Meeting: {} ({})\nTranscript:\n{}",
+                title, created_at, transcript
+            )
         };
 
         let system = "You are Phomy, a calm meeting assistant. Answer the question using the meeting context provided. Be helpful and concise.";
         let user = format!("{}\n\nQuestion: {}", context, question);
-        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+        return client
+            .complete(system, &user)
+            .await
+            .map_err(|e| format!("LLM error: {}", e));
     }
 
     // ---- Route 4: Global/weekly summaries ("this week", "all meetings", "overall") ----
-    let is_global = q.contains("this week") || q.contains("all meetings")
-        || q.contains("overall") || q.contains("week cover")
-        || q.contains("meetings about") || q.contains("my meetings");
+    let is_global = q.contains("this week")
+        || q.contains("all meetings")
+        || q.contains("overall")
+        || q.contains("week cover")
+        || q.contains("meetings about")
+        || q.contains("my meetings");
 
     if is_global {
-        let meetings = state.db.get_recent_meetings_with_summaries(10)
+        let meetings = state
+            .db
+            .get_recent_meetings_with_summaries(10)
             .map_err(|e| format!("DB error: {}", e))?;
 
         if meetings.is_empty() {
             return Err("No completed meetings found.".to_string());
         }
 
-        let context: String = meetings.iter().map(|(_, title, created_at, summary)| {
-            if let Some(s) = summary {
-                format!("--- {} ({}) ---\n{}\n", title, created_at, s)
-            } else {
-                format!("--- {} ({}) ---\n(no summary available)\n", title, created_at)
-            }
-        }).collect::<Vec<_>>().join("\n");
+        let context: String = meetings
+            .iter()
+            .map(|(_, title, created_at, summary)| {
+                if let Some(s) = summary {
+                    format!("--- {} ({}) ---\n{}\n", title, created_at, s)
+                } else {
+                    format!(
+                        "--- {} ({}) ---\n(no summary available)\n",
+                        title, created_at
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
 
         let system = "You are Phomy, a calm meeting assistant. Provide a high-level overview across the meetings described. Be concise and organized.";
         let user = format!("Meeting summaries:\n{}\n\nQuestion: {}", context, question);
-        return client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e));
+        return client
+            .complete(system, &user)
+            .await
+            .map_err(|e| format!("LLM error: {}", e));
     }
 
     // ---- Default: semantic search across all meetings (existing behavior) ----
@@ -1317,12 +1541,13 @@ pub async fn phomy_ask(
         };
         if let Some(emb) = query_emb {
             match state.db.search_semantic(&emb, limit, None) {
-                Ok(results) if !results.is_empty() => {
-                    Some(results.iter()
+                Ok(results) if !results.is_empty() => Some(
+                    results
+                        .iter()
                         .map(|r| format!("[{} - {}] {}", r.meeting_title, r.time_label, r.text))
                         .collect::<Vec<_>>()
-                        .join("\n"))
-                }
+                        .join("\n"),
+                ),
                 _ => None,
             }
         } else {
@@ -1332,12 +1557,19 @@ pub async fn phomy_ask(
 
     let context = match semantic_context {
         Some(ctx) => ctx,
-        None => return Err("No relevant context found. Try asking about a specific meeting.".to_string()),
+        None => {
+            return Err(
+                "No relevant context found. Try asking about a specific meeting.".to_string(),
+            )
+        }
     };
 
     let system = "You are Phomy, a calm meeting assistant. Answer the question using the provided meeting context. Be helpful and concise. If the answer isn't in the context, say so.";
     let user = format!("Context:\n{}\n\nQuestion: {}", context, question);
-    client.complete(system, &user).await.map_err(|e| format!("LLM error: {}", e))
+    client
+        .complete(system, &user)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))
 }
 
 /// Extract time in minutes from natural language (e.g., "last 5 minutes" → 5)
@@ -1367,12 +1599,15 @@ pub async fn generate_summary(
 ) -> Result<Summary, String> {
     // Build transcript text: from DB if meeting_id provided, otherwise from live transcript
     let transcript_text: String = if let Some(ref mid) = meeting_id {
-        let segments = state.db.get_segments(mid)
+        let segments = state
+            .db
+            .get_segments(mid)
             .map_err(|e| format!("DB error: {}", e))?;
         if segments.is_empty() {
             return Err("No transcript available for this meeting".to_string());
         }
-        segments.iter()
+        segments
+            .iter()
             .map(|s| format!("[{}] {}", s.time_label, s.text))
             .collect::<Vec<_>>()
             .join("\n")
@@ -1381,7 +1616,8 @@ pub async fn generate_summary(
         if transcript.is_empty() {
             return Err("No transcript available".to_string());
         }
-        transcript.iter()
+        transcript
+            .iter()
             .map(|s| format!("[{}] {}", s.time, s.text))
             .collect::<Vec<_>>()
             .join("\n")
@@ -1391,17 +1627,25 @@ pub async fn generate_summary(
     let settings = state.settings.lock().await;
     let provider = match settings.llm_provider.as_str() {
         "openai" => {
-            let api_key = settings.openai_api_key.clone()
+            let api_key = settings
+                .openai_api_key
+                .clone()
                 .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
             if api_key.is_empty() {
-                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+                return Err(
+                    "OpenAI API key is empty. Please add your API key in Settings.".to_string(),
+                );
             }
             LlmProvider::OpenAI { api_key }
         }
         "ollama" | _ => {
-            let url = settings.ollama_url.clone()
+            let url = settings
+                .ollama_url
+                .clone()
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
-            let model = settings.ollama_model.clone()
+            let model = settings
+                .ollama_model
+                .clone()
                 .unwrap_or_else(|| "llama3.2".to_string());
             LlmProvider::Ollama { url, model }
         }
@@ -1411,7 +1655,8 @@ pub async fn generate_summary(
     let client = LlmClient::new(provider);
     log::info!("Generating meeting summary");
 
-    let summary_text = client.summarize(&transcript_text)
+    let summary_text = client
+        .summarize(&transcript_text)
         .await
         .map_err(|e| format!("LLM error: {}", e))?;
 
@@ -1424,15 +1669,29 @@ pub async fn generate_summary(
 
     for line in lines {
         let line_lower = line.to_lowercase();
-        if line_lower.contains("action item") || line_lower.contains("todo") || line_lower.contains("next step") {
+        if line_lower.contains("action item")
+            || line_lower.contains("todo")
+            || line_lower.contains("next step")
+        {
             current_section = "actions";
             continue;
-        } else if line_lower.contains("key point") || line_lower.contains("highlight") || line_lower.contains("important") {
+        } else if line_lower.contains("key point")
+            || line_lower.contains("highlight")
+            || line_lower.contains("important")
+        {
             current_section = "points";
             continue;
         }
 
-        let trimmed = line.trim().trim_start_matches(&['-', '*', '\u{2022}', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.', ')'][..]).trim();
+        let trimmed = line
+            .trim()
+            .trim_start_matches(
+                &[
+                    '-', '*', '\u{2022}', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '.',
+                    ')',
+                ][..],
+            )
+            .trim();
         if trimmed.is_empty() {
             continue;
         }
@@ -1468,35 +1727,46 @@ pub async fn generate_title(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     // Get transcript segments (first few for context)
-    let segments = state.db.get_segments(&meeting_id)
+    let segments = state
+        .db
+        .get_segments(&meeting_id)
         .map_err(|e| format!("DB error: {}", e))?;
-    
+
     if segments.is_empty() {
         return Err("No transcript available for this meeting".to_string());
     }
-    
+
     // Use first 10 segments for title generation (to get context without too much text)
     let context_segments: Vec<_> = segments.iter().take(10).collect();
-    let transcript_text: String = context_segments.iter()
+    let transcript_text: String = context_segments
+        .iter()
         .map(|s| s.text.clone())
         .collect::<Vec<_>>()
         .join(" ");
-    
+
     // Get settings and create LLM client
     let settings = state.settings.lock().await;
     let provider = match settings.llm_provider.as_str() {
         "openai" => {
-            let api_key = settings.openai_api_key.clone()
+            let api_key = settings
+                .openai_api_key
+                .clone()
                 .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
             if api_key.is_empty() {
-                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+                return Err(
+                    "OpenAI API key is empty. Please add your API key in Settings.".to_string(),
+                );
             }
             LlmProvider::OpenAI { api_key }
         }
         "ollama" | _ => {
-            let url = settings.ollama_url.clone()
+            let url = settings
+                .ollama_url
+                .clone()
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
-            let model = settings.ollama_model.clone()
+            let model = settings
+                .ollama_model
+                .clone()
                 .unwrap_or_else(|| "llama3.2".to_string());
             LlmProvider::Ollama { url, model }
         }
@@ -1506,17 +1776,24 @@ pub async fn generate_title(
     let client = LlmClient::new(provider);
     log::info!("Generating meeting title for {}", meeting_id);
 
-    let title = client.generate_title(&transcript_text)
+    let title = client
+        .generate_title(&transcript_text)
         .await
         .map_err(|e| format!("LLM error: {}", e))?;
-    
+
     // Clean up the title (remove quotes if present)
-    let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
-    
+    let title = title
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_string();
+
     // Update the meeting title in the database
-    state.db.update_meeting_title(&meeting_id, &title)
+    state
+        .db
+        .update_meeting_title(&meeting_id, &title)
         .map_err(|e| format!("Failed to update title: {}", e))?;
-    
+
     log::info!("Generated title: {}", title);
     Ok(title)
 }
@@ -1531,17 +1808,25 @@ pub async fn generate_suggested_questions(
     let settings = state.settings.lock().await;
     let provider = match settings.llm_provider.as_str() {
         "openai" => {
-            let api_key = settings.openai_api_key.clone()
+            let api_key = settings
+                .openai_api_key
+                .clone()
                 .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
             if api_key.is_empty() {
-                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+                return Err(
+                    "OpenAI API key is empty. Please add your API key in Settings.".to_string(),
+                );
             }
             LlmProvider::OpenAI { api_key }
         }
         "ollama" | _ => {
-            let url = settings.ollama_url.clone()
+            let url = settings
+                .ollama_url
+                .clone()
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
-            let model = settings.ollama_model.clone()
+            let model = settings
+                .ollama_model
+                .clone()
                 .unwrap_or_else(|| "llama3.2".to_string());
             LlmProvider::Ollama { url, model }
         }
@@ -1551,10 +1836,11 @@ pub async fn generate_suggested_questions(
     let client = LlmClient::new(provider);
     log::info!("Generating suggested questions from transcript context");
 
-    let questions = client.generate_suggested_questions(&transcript_context)
+    let questions = client
+        .generate_suggested_questions(&transcript_context)
         .await
         .map_err(|e| format!("LLM error: {}", e))?;
-    
+
     log::info!("Generated {} suggested questions", questions.len());
     Ok(questions)
 }
@@ -1565,23 +1851,19 @@ pub async fn generate_suggested_questions(
 
 /// Get current settings
 #[tauri::command]
-pub async fn get_settings(
-    state: State<'_, AppState>,
-) -> Result<Settings, String> {
+pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     let settings = state.settings.lock().await.clone();
     Ok(settings)
 }
 
 /// Save settings (also persists to DB)
 #[tauri::command]
-pub async fn save_settings(
-    settings: Settings,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn save_settings(settings: Settings, state: State<'_, AppState>) -> Result<(), String> {
     // Persist to DB
-    let json = serde_json::to_string(&settings)
-        .map_err(|e| format!("Serialize error: {}", e))?;
-    state.db.save_settings_json(&json)
+    let json = serde_json::to_string(&settings).map_err(|e| format!("Serialize error: {}", e))?;
+    state
+        .db
+        .save_settings_json(&json)
         .map_err(|e| format!("DB error: {}", e))?;
 
     *state.settings.lock().await = settings;
@@ -1596,19 +1878,16 @@ pub async fn save_settings(
 /// Check if required ML models are downloaded
 /// Checks ALL whisper models — returns the first downloaded one found
 #[tauri::command]
-pub async fn check_model_status(
-    state: State<'_, AppState>,
-) -> Result<ModelStatus, String> {
+pub async fn check_model_status(state: State<'_, AppState>) -> Result<ModelStatus, String> {
     let settings = state.settings.lock().await;
     let configured_model_name = settings.whisper_model.clone();
     drop(settings);
 
     // First check the configured model
-    let configured: WhisperModel = configured_model_name.parse()
-        .unwrap_or(WhisperModel::Small);
+    let configured: WhisperModel = configured_model_name.parse().unwrap_or(WhisperModel::Small);
 
-    let models_dir = asr::get_models_dir()
-        .map_err(|e| format!("Failed to get models dir: {}", e))?;
+    let models_dir =
+        asr::get_models_dir().map_err(|e| format!("Failed to get models dir: {}", e))?;
 
     if asr::is_model_downloaded(configured).unwrap_or(false) {
         return Ok(ModelStatus {
@@ -1621,8 +1900,11 @@ pub async fn check_model_status(
 
     // Fallback: check if ANY model is downloaded
     let all_models = [
-        WhisperModel::Tiny, WhisperModel::Base, WhisperModel::Small,
-        WhisperModel::Medium, WhisperModel::Large,
+        WhisperModel::Tiny,
+        WhisperModel::Base,
+        WhisperModel::Small,
+        WhisperModel::Medium,
+        WhisperModel::Large,
     ];
     for model in all_models {
         if asr::is_model_downloaded(model).unwrap_or(false) {
@@ -1647,8 +1929,7 @@ pub async fn check_model_status(
 /// Get info about all available models
 #[tauri::command]
 pub async fn get_models_info() -> Result<Vec<ModelInfo>, String> {
-    models::get_all_models_status()
-        .map_err(|e| format!("Failed to get models info: {}", e))
+    models::get_all_models_status().map_err(|e| format!("Failed to get models info: {}", e))
 }
 
 /// Download a specific model (Whisper or Parakeet)
@@ -1667,7 +1948,8 @@ pub async fn download_model(
     #[cfg(feature = "parakeet")]
     if model_name.starts_with("parakeet-") {
         let parakeet_name = model_name.trim_start_matches("parakeet-");
-        let model: ParakeetModel = parakeet_name.parse()
+        let model: ParakeetModel = parakeet_name
+            .parse()
             .map_err(|e: anyhow::Error| e.to_string())?;
 
         if !model.is_ctc() {
@@ -1681,7 +1963,8 @@ pub async fn download_model(
         let mut engine = TranscriptionEngine::with_backend(AsrBackendType::Parakeet)
             .map_err(|e| e.to_string())?;
         engine.set_language(&language);
-        engine.load_model(&model_path)
+        engine
+            .load_model(&model_path)
             .map_err(|e| format!("Failed to load model: {}", e))?;
 
         *state.transcription_engine.lock().await = Some(engine);
@@ -1691,11 +1974,15 @@ pub async fn download_model(
 
     #[cfg(not(feature = "parakeet"))]
     if model_name.starts_with("parakeet-") {
-        return Err("Parakeet backend is not available. Rebuild with --features parakeet to enable it.".to_string());
+        return Err(
+            "Parakeet backend is not available. Rebuild with --features parakeet to enable it."
+                .to_string(),
+        );
     }
 
     // Whisper models (default)
-    let model: WhisperModel = model_name.parse()
+    let model: WhisperModel = model_name
+        .parse()
         .map_err(|e: anyhow::Error| e.to_string())?;
 
     let model_path = models::download_model(&app, model)
@@ -1704,20 +1991,22 @@ pub async fn download_model(
 
     let mut engine = TranscriptionEngine::new();
     engine.set_language(&language);
-    engine.load_model(&model_path)
+    engine
+        .load_model(&model_path)
         .map_err(|e| format!("Failed to load model: {}", e))?;
 
     *state.transcription_engine.lock().await = Some(engine);
-    log::info!("Whisper model {} loaded and ready with language '{}'", model_name, language);
+    log::info!(
+        "Whisper model {} loaded and ready with language '{}'",
+        model_name,
+        language
+    );
     Ok(())
 }
 
 /// Load an already-downloaded model into memory (Whisper or Parakeet)
 #[tauri::command]
-pub async fn load_model(
-    model_name: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn load_model(model_name: String, state: State<'_, AppState>) -> Result<(), String> {
     let language = {
         let settings = state.settings.lock().await;
         settings.language.clone()
@@ -1727,7 +2016,8 @@ pub async fn load_model(
     #[cfg(feature = "parakeet")]
     if model_name.starts_with("parakeet-") {
         let parakeet_name = model_name.trim_start_matches("parakeet-");
-        let model: ParakeetModel = parakeet_name.parse()
+        let model: ParakeetModel = parakeet_name
+            .parse()
             .map_err(|e: anyhow::Error| e.to_string())?;
 
         let model_path = crate::asr::parakeet_backend::get_parakeet_model_path(model)
@@ -1737,11 +2027,16 @@ pub async fn load_model(
             return Err(format!("Parakeet model {} is not downloaded", model_name));
         }
 
-        log::info!("Loading Parakeet model {} from {:?}", model_name, model_path);
+        log::info!(
+            "Loading Parakeet model {} from {:?}",
+            model_name,
+            model_path
+        );
         let mut engine = TranscriptionEngine::with_backend(AsrBackendType::Parakeet)
             .map_err(|e| e.to_string())?;
         engine.set_language(&language);
-        engine.load_model(&model_path)
+        engine
+            .load_model(&model_path)
             .map_err(|e| format!("Failed to load model: {}", e))?;
 
         *state.transcription_engine.lock().await = Some(engine);
@@ -1751,28 +2046,42 @@ pub async fn load_model(
 
     #[cfg(not(feature = "parakeet"))]
     if model_name.starts_with("parakeet-") {
-        return Err("Parakeet backend is not available. Rebuild with --features parakeet to enable it.".to_string());
+        return Err(
+            "Parakeet backend is not available. Rebuild with --features parakeet to enable it."
+                .to_string(),
+        );
     }
 
     // Whisper models (default)
-    let model: WhisperModel = model_name.parse()
+    let model: WhisperModel = model_name
+        .parse()
         .map_err(|e: anyhow::Error| e.to_string())?;
 
-    let model_path = asr::get_model_path(model)
-        .map_err(|e| format!("Failed to get model path: {}", e))?;
+    let model_path =
+        asr::get_model_path(model).map_err(|e| format!("Failed to get model path: {}", e))?;
 
     if !model_path.exists() {
         return Err(format!("Model {} is not downloaded", model_name));
     }
 
-    log::info!("Loading model {} with language '{}' from {:?}", model_name, language, model_path);
+    log::info!(
+        "Loading model {} with language '{}' from {:?}",
+        model_name,
+        language,
+        model_path
+    );
     let mut engine = TranscriptionEngine::new();
     engine.set_language(&language);
-    engine.load_model(&model_path)
+    engine
+        .load_model(&model_path)
         .map_err(|e| format!("Failed to load model: {}", e))?;
 
     *state.transcription_engine.lock().await = Some(engine);
-    log::info!("Model {} loaded and ready with language '{}'", model_name, language);
+    log::info!(
+        "Model {} loaded and ready with language '{}'",
+        model_name,
+        language
+    );
     Ok(())
 }
 
@@ -1800,21 +2109,31 @@ pub async fn import_model(
         ));
     }
 
-    let model: WhisperModel = model_name.parse()
+    let model: WhisperModel = model_name
+        .parse()
         .map_err(|e: anyhow::Error| e.to_string())?;
 
-    let target_path = asr::get_model_path(model)
-        .map_err(|e| format!("Failed to get model path: {}", e))?;
+    let target_path =
+        asr::get_model_path(model).map_err(|e| format!("Failed to get model path: {}", e))?;
 
     // Handle .zip files by extracting the .bin inside
     let is_zip = source.extension().and_then(|e| e.to_str()) == Some("zip");
 
     if is_zip {
-        log::info!("Extracting model from zip {:?} to {:?}", source, target_path);
+        log::info!(
+            "Extracting model from zip {:?} to {:?}",
+            source,
+            target_path
+        );
         crate::models::extract_bin_from_zip(&source, &target_path)
             .map_err(|e| format!("Failed to extract model from zip: {}", e))?;
     } else {
-        log::info!("Importing model from {:?} to {:?} ({} bytes)", source, target_path, file_size);
+        log::info!(
+            "Importing model from {:?} to {:?} ({} bytes)",
+            source,
+            target_path,
+            file_size
+        );
         std::fs::copy(&source, &target_path)
             .map_err(|e| format!("Failed to copy model file: {}", e))?;
     }
@@ -1827,12 +2146,11 @@ pub async fn import_model(
 
     let mut engine = TranscriptionEngine::new();
     engine.set_language(&language);
-    engine.load_model(&target_path)
-        .map_err(|e| {
-            // Clean up if loading fails
-            let _ = std::fs::remove_file(&target_path);
-            format!("File copied but failed to load model: {}", e)
-        })?;
+    engine.load_model(&target_path).map_err(|e| {
+        // Clean up if loading fails
+        let _ = std::fs::remove_file(&target_path);
+        format!("File copied but failed to load model: {}", e)
+    })?;
 
     *state.transcription_engine.lock().await = Some(engine);
     log::info!("Model {} imported and loaded successfully", model_name);
@@ -1842,7 +2160,8 @@ pub async fn import_model(
 /// Get the download URL for a whisper model (for manual download)
 #[tauri::command]
 pub async fn get_model_download_url(model_name: String) -> Result<serde_json::Value, String> {
-    let model: WhisperModel = model_name.parse()
+    let model: WhisperModel = model_name
+        .parse()
         .map_err(|e: anyhow::Error| e.to_string())?;
     Ok(serde_json::json!({
         "huggingface": model.download_url(),
@@ -1857,24 +2176,27 @@ pub async fn get_model_download_url(model_name: String) -> Result<serde_json::Va
 /// List available audio input devices
 #[tauri::command]
 pub async fn list_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
-    let capture = AudioCapture::new()
-        .map_err(|e| format!("Failed to init audio: {}", e))?;
+    let capture = AudioCapture::new().map_err(|e| format!("Failed to init audio: {}", e))?;
 
-    let devices = capture.list_devices()
+    let devices = capture
+        .list_devices()
         .map_err(|e| format!("Failed to list devices: {}", e))?;
 
-    Ok(devices.into_iter().map(|d| AudioDeviceInfo {
-        name: d.name,
-        is_default: d.is_default,
-    }).collect())
+    Ok(devices
+        .into_iter()
+        .map(|d| AudioDeviceInfo {
+            name: d.name,
+            is_default: d.is_default,
+        })
+        .collect())
 }
 
 // ============================================================================
 // Device Specs Commands
 // ============================================================================
 
+use crate::asr::{get_available_backends, BackendInfo};
 use crate::specs::{DeviceSpecs, ModelRecommendation};
-use crate::asr::{BackendInfo, get_available_backends};
 
 /// Get device specifications (CPU, RAM, GPU)
 #[tauri::command]
@@ -1923,11 +2245,9 @@ pub async fn download_embedding_model_cmd(
 
 /// Load an already-downloaded embedding model
 #[tauri::command]
-pub async fn load_embedding_model(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let model_dir = models::get_embedding_model_dir()
-        .map_err(|e| format!("Failed to get model dir: {}", e))?;
+pub async fn load_embedding_model(state: State<'_, AppState>) -> Result<(), String> {
+    let model_dir =
+        models::get_embedding_model_dir().map_err(|e| format!("Failed to get model dir: {}", e))?;
 
     if !model_dir.join("model.onnx").exists() {
         return Err("Embedding model not downloaded".to_string());
@@ -1952,33 +2272,35 @@ pub async fn semantic_search(
     let lim = limit.unwrap_or(10);
 
     let model_guard = state.embedding_model.lock().await;
-    let model = model_guard.as_ref()
-        .ok_or("Embedding model not loaded")?;
+    let model = model_guard.as_ref().ok_or("Embedding model not loaded")?;
 
-    let query_emb = model.embed(&query)
+    let query_emb = model
+        .embed(&query)
         .map_err(|e| format!("Embedding failed: {}", e))?;
     drop(model_guard);
 
-    state.db.search_semantic(&query_emb, lim, meeting_id.as_deref())
+    state
+        .db
+        .search_semantic(&query_emb, lim, meeting_id.as_deref())
         .map_err(|e| format!("Search error: {}", e))
 }
 
 /// Batch embed all unembedded segments in a meeting
 #[tauri::command]
-pub async fn embed_meeting(
-    meeting_id: String,
-    state: State<'_, AppState>,
-) -> Result<u64, String> {
+pub async fn embed_meeting(meeting_id: String, state: State<'_, AppState>) -> Result<u64, String> {
     let model_guard = state.embedding_model.lock().await;
-    let model = model_guard.as_ref()
-        .ok_or("Embedding model not loaded")?;
+    let model = model_guard.as_ref().ok_or("Embedding model not loaded")?;
 
     // Get meeting title for enrichment
-    let meeting = state.db.get_meeting(&meeting_id)
+    let meeting = state
+        .db
+        .get_meeting(&meeting_id)
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or("Meeting not found")?;
 
-    let unembedded = state.db.get_unembedded_segment_ids(&meeting_id)
+    let unembedded = state
+        .db
+        .get_unembedded_segment_ids(&meeting_id)
         .map_err(|e| format!("DB error: {}", e))?;
 
     let mut count = 0u64;
@@ -2004,11 +2326,11 @@ pub async fn embed_meeting(
 
 /// Get embedding status (model loaded, counts)
 #[tauri::command]
-pub async fn get_embedding_status(
-    state: State<'_, AppState>,
-) -> Result<EmbeddingStatus, String> {
+pub async fn get_embedding_status(state: State<'_, AppState>) -> Result<EmbeddingStatus, String> {
     let model_loaded = state.embedding_model.lock().await.is_some();
-    let (embedded_count, total_segments) = state.db.count_embeddings()
+    let (embedded_count, total_segments) = state
+        .db
+        .count_embeddings()
         .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(EmbeddingStatus {
@@ -2048,7 +2370,7 @@ pub async fn import_embedding_model(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let source_path = std::path::PathBuf::from(&file_path);
-    
+
     let model_dir = models::import_embedding_model(&source_path)
         .map_err(|e| format!("Import failed: {}", e))?;
 
@@ -2125,7 +2447,11 @@ pub async fn start_meeting_detection(
 
             // Check for new meeting detected
             if let Some(detected) = detector.detect_meeting() {
-                log::info!("Meeting detected: {} ({})", detected.app_name, detected.process_name);
+                log::info!(
+                    "Meeting detected: {} ({})",
+                    detected.app_name,
+                    detected.process_name
+                );
 
                 // Check if system notifications are enabled
                 let show_system_notifications = {
@@ -2137,10 +2463,14 @@ pub async fn start_meeting_detection(
                 #[cfg(desktop)]
                 if show_system_notifications {
                     use tauri_plugin_notification::NotificationExt;
-                    if let Err(e) = app.notification()
+                    if let Err(e) = app
+                        .notification()
                         .builder()
                         .title("Meeting Detected")
-                        .body(&format!("{} is running. Would you like to start recording?", detected.app_name))
+                        .body(&format!(
+                            "{} is running. Would you like to start recording?",
+                            detected.app_name
+                        ))
                         .show()
                     {
                         log::warn!("Failed to send native notification: {}", e);
@@ -2150,7 +2480,10 @@ pub async fn start_meeting_detection(
                 // Also emit in-app notification event (always)
                 let event = MeetingDetectedEvent {
                     app_name: detected.app_name.clone(),
-                    message: format!("{} detected! Would you like to start recording?", detected.app_name),
+                    message: format!(
+                        "{} detected! Would you like to start recording?",
+                        detected.app_name
+                    ),
                 };
 
                 if let Err(e) = app.emit("meeting-detected", &event) {
@@ -2187,9 +2520,7 @@ pub async fn start_meeting_detection(
 
 /// Stop automatic meeting detection
 #[tauri::command]
-pub async fn stop_meeting_detection(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn stop_meeting_detection(state: State<'_, AppState>) -> Result<(), String> {
     state.detection_running.store(false, Ordering::SeqCst);
 
     // Clear notification tracking
@@ -2202,9 +2533,7 @@ pub async fn stop_meeting_detection(
 
 /// Check if meeting detection is currently running
 #[tauri::command]
-pub async fn is_meeting_detection_running(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn is_meeting_detection_running(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(state.detection_running.load(Ordering::SeqCst))
 }
 
@@ -2212,9 +2541,7 @@ pub async fn is_meeting_detection_running(
 /// Keeps the meeting in "dismissed" state until it actually ends,
 /// preventing repeated notifications for the same meeting
 #[tauri::command]
-pub async fn dismiss_meeting_notification(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn dismiss_meeting_notification(state: State<'_, AppState>) -> Result<(), String> {
     let mut detector = state.meeting_detector.lock().await;
     detector.dismiss_notification(); // Mark as dismissed, not cleared
     log::info!("Meeting notification dismissed (will not re-notify until meeting ends)");
@@ -2223,9 +2550,7 @@ pub async fn dismiss_meeting_notification(
 
 /// Check if a meeting app is currently running (one-shot check)
 #[tauri::command]
-pub async fn check_meeting_running(
-    state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
+pub async fn check_meeting_running(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let mut detector = state.meeting_detector.lock().await;
     Ok(detector.is_meeting_running().map(|d| d.app_name))
 }
@@ -2293,10 +2618,11 @@ pub async fn get_meeting_stats(
     to_date: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<MeetingStats, String> {
-    let (count, duration_ms) = state.db
+    let (count, duration_ms) = state
+        .db
         .get_meeting_stats(from_date.as_deref(), to_date.as_deref())
         .map_err(|e| format!("Failed to get stats: {}", e))?;
-    
+
     Ok(MeetingStats {
         meeting_count: count,
         total_duration_ms: duration_ms,
@@ -2316,14 +2642,17 @@ pub async fn extract_meeting_metadata(
     state: State<'_, AppState>,
 ) -> Result<ExtractedMetadata, String> {
     // Get full transcript
-    let segments = state.db.get_segments(&meeting_id)
+    let segments = state
+        .db
+        .get_segments(&meeting_id)
         .map_err(|e| format!("Failed to get segments: {}", e))?;
-    
-    let transcript = segments.iter()
+
+    let transcript = segments
+        .iter()
         .map(|s| s.text.clone())
         .collect::<Vec<_>>()
         .join("\n");
-    
+
     if transcript.is_empty() {
         return Err("No transcript found for this meeting".to_string());
     }
@@ -2333,14 +2662,20 @@ pub async fn extract_meeting_metadata(
         let settings = state.settings.lock().await;
         match settings.llm_provider.as_str() {
             "openai" => {
-                let api_key = settings.openai_api_key.clone()
+                let api_key = settings
+                    .openai_api_key
+                    .clone()
                     .ok_or("OpenAI API key not configured")?;
                 LlmProvider::OpenAI { api_key }
             }
             _ => {
-                let url = settings.ollama_url.clone()
+                let url = settings
+                    .ollama_url
+                    .clone()
                     .unwrap_or_else(|| "http://localhost:11434".to_string());
-                let model = settings.ollama_model.clone()
+                let model = settings
+                    .ollama_model
+                    .clone()
                     .unwrap_or_else(|| "llama3.2".to_string());
                 LlmProvider::Ollama { url, model }
             }
@@ -2349,7 +2684,8 @@ pub async fn extract_meeting_metadata(
     let client = LlmClient::new(provider);
 
     // Extract metadata using LLM
-    let metadata = client.extract_metadata(&transcript)
+    let metadata = client
+        .extract_metadata(&transcript)
         .await
         .map_err(|e| format!("Failed to extract metadata: {}", e))?;
 
@@ -2357,14 +2693,17 @@ pub async fn extract_meeting_metadata(
     let topics = serde_json::to_string(&metadata.topics).ok();
     let action_items = serde_json::to_string(&metadata.action_items).ok();
     let decisions = serde_json::to_string(&metadata.decisions).ok();
-    
-    state.db.update_meeting_metadata(
-        &meeting_id,
-        topics.as_deref(),
-        action_items.as_deref(),
-        decisions.as_deref(),
-        metadata.participant_count_estimate,
-    ).map_err(|e| format!("Failed to save metadata: {}", e))?;
+
+    state
+        .db
+        .update_meeting_metadata(
+            &meeting_id,
+            topics.as_deref(),
+            action_items.as_deref(),
+            decisions.as_deref(),
+            metadata.participant_count_estimate,
+        )
+        .map_err(|e| format!("Failed to save metadata: {}", e))?;
 
     Ok(ExtractedMetadata {
         topics: metadata.topics,
@@ -2390,30 +2729,48 @@ pub async fn enhance_transcript_segment(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     // Get segments
-    let segments = state.db.get_segments(&meeting_id)
+    let segments = state
+        .db
+        .get_segments(&meeting_id)
         .map_err(|e| format!("Failed to get segments: {}", e))?;
-    
+
     // Find the target segment and its neighbors
-    let idx = segments.iter().position(|s| s.id == segment_id)
+    let idx = segments
+        .iter()
+        .position(|s| s.id == segment_id)
         .ok_or("Segment not found")?;
-    
-    let prev_text = if idx > 0 { Some(segments[idx - 1].text.as_str()) } else { None };
+
+    let prev_text = if idx > 0 {
+        Some(segments[idx - 1].text.as_str())
+    } else {
+        None
+    };
     let current_text = &segments[idx].text;
-    let next_text = if idx + 1 < segments.len() { Some(segments[idx + 1].text.as_str()) } else { None };
+    let next_text = if idx + 1 < segments.len() {
+        Some(segments[idx + 1].text.as_str())
+    } else {
+        None
+    };
 
     // Build LLM client
     let provider = {
         let settings = state.settings.lock().await;
         match settings.llm_provider.as_str() {
             "openai" => {
-                let api_key = settings.openai_api_key.clone()
+                let api_key = settings
+                    .openai_api_key
+                    .clone()
                     .ok_or("OpenAI API key not configured")?;
                 LlmProvider::OpenAI { api_key }
             }
             _ => {
-                let url = settings.ollama_url.clone()
+                let url = settings
+                    .ollama_url
+                    .clone()
                     .unwrap_or_else(|| "http://localhost:11434".to_string());
-                let model = settings.ollama_model.clone()
+                let model = settings
+                    .ollama_model
+                    .clone()
                     .unwrap_or_else(|| "llama3.2".to_string());
                 LlmProvider::Ollama { url, model }
             }
@@ -2422,12 +2779,15 @@ pub async fn enhance_transcript_segment(
     let client = LlmClient::new(provider);
 
     // Enhance segment
-    let enhanced = client.enhance_segment(prev_text, current_text, next_text)
+    let enhanced = client
+        .enhance_segment(prev_text, current_text, next_text)
         .await
         .map_err(|e| format!("Failed to enhance segment: {}", e))?;
 
     // Save to database
-    state.db.update_segment_enhanced_text(&segment_id, Some(&enhanced))
+    state
+        .db
+        .update_segment_enhanced_text(&segment_id, Some(&enhanced))
         .map_err(|e| format!("Failed to save enhanced text: {}", e))?;
 
     Ok(enhanced)
@@ -2441,12 +2801,16 @@ pub async fn detect_and_answer_question(
     state: State<'_, AppState>,
 ) -> Result<QuestionResult, String> {
     // Get segments
-    let segments = state.db.get_segments(&meeting_id)
+    let segments = state
+        .db
+        .get_segments(&meeting_id)
         .map_err(|e| format!("Failed to get segments: {}", e))?;
-    
-    let idx = segments.iter().position(|s| s.id == segment_id)
+
+    let idx = segments
+        .iter()
+        .position(|s| s.id == segment_id)
         .ok_or("Segment not found")?;
-    
+
     let current_text = &segments[idx].text;
 
     // Build LLM client
@@ -2454,14 +2818,20 @@ pub async fn detect_and_answer_question(
         let settings = state.settings.lock().await;
         match settings.llm_provider.as_str() {
             "openai" => {
-                let api_key = settings.openai_api_key.clone()
+                let api_key = settings
+                    .openai_api_key
+                    .clone()
                     .ok_or("OpenAI API key not configured")?;
                 LlmProvider::OpenAI { api_key }
             }
             _ => {
-                let url = settings.ollama_url.clone()
+                let url = settings
+                    .ollama_url
+                    .clone()
                     .unwrap_or_else(|| "http://localhost:11434".to_string());
-                let model = settings.ollama_model.clone()
+                let model = settings
+                    .ollama_model
+                    .clone()
                     .unwrap_or_else(|| "llama3.2".to_string());
                 LlmProvider::Ollama { url, model }
             }
@@ -2470,7 +2840,8 @@ pub async fn detect_and_answer_question(
     let client = LlmClient::new(provider);
 
     // Detect if it's a question
-    let is_question = client.detect_question(current_text)
+    let is_question = client
+        .detect_question(current_text)
         .await
         .map_err(|e| format!("Failed to detect question: {}", e))?;
 
@@ -2483,15 +2854,18 @@ pub async fn detect_and_answer_question(
             .map(|s| s.text.clone())
             .collect::<Vec<_>>()
             .join("\n");
-        
-        let ans = client.answer_question(current_text, &context)
+
+        let ans = client
+            .answer_question(current_text, &context)
             .await
             .map_err(|e| format!("Failed to generate answer: {}", e))?;
-        
+
         // Save to database
-        state.db.update_segment_question(&segment_id, true, Some(&ans))
+        state
+            .db
+            .update_segment_question(&segment_id, true, Some(&ans))
             .map_err(|e| format!("Failed to save question: {}", e))?;
-        
+
         Some(ans)
     } else {
         None
@@ -2511,19 +2885,21 @@ pub struct QuestionResult {
 
 /// Web search command for Phomy
 #[tauri::command]
-pub async fn web_search(
-    query: String,
-) -> Result<Vec<WebSearchResult>, String> {
+pub async fn web_search(query: String) -> Result<Vec<WebSearchResult>, String> {
     let client = crate::websearch::WebSearchClient::new();
-    let results = client.search(&query, 5)
+    let results = client
+        .search(&query, 5)
         .await
         .map_err(|e| format!("Search failed: {}", e))?;
-    
-    Ok(results.into_iter().map(|r| WebSearchResult {
-        title: r.title,
-        url: r.url,
-        snippet: r.snippet,
-    }).collect())
+
+    Ok(results
+        .into_iter()
+        .map(|r| WebSearchResult {
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet,
+        })
+        .collect())
 }
 
 #[derive(Debug, Serialize)]
@@ -2542,46 +2918,63 @@ pub async fn phomy_ask_with_search(
 ) -> Result<String, String> {
     // First try to answer from meeting data
     let answer = phomy_ask(question.clone(), state.clone()).await;
-    
+
     // If answer fails or indicates no context, try web search
-    if use_web_search && (answer.is_err() || answer.as_ref().map(|a| a.contains("No meeting")).unwrap_or(false)) {
+    if use_web_search
+        && (answer.is_err()
+            || answer
+                .as_ref()
+                .map(|a| a.contains("No meeting"))
+                .unwrap_or(false))
+    {
         // Perform web search
         let search_results = web_search(question.clone()).await?;
-        
+
         if !search_results.is_empty() {
             // Use LLM to synthesize answer from web results
             let provider = {
                 let settings = state.settings.lock().await;
                 match settings.llm_provider.as_str() {
                     "openai" => {
-                        let api_key = settings.openai_api_key.clone()
+                        let api_key = settings
+                            .openai_api_key
+                            .clone()
                             .ok_or("OpenAI API key not configured")?;
                         LlmProvider::OpenAI { api_key }
                     }
                     _ => {
-                        let url = settings.ollama_url.clone()
+                        let url = settings
+                            .ollama_url
+                            .clone()
                             .unwrap_or_else(|| "http://localhost:11434".to_string());
-                        let model = settings.ollama_model.clone()
+                        let model = settings
+                            .ollama_model
+                            .clone()
                             .unwrap_or_else(|| "llama3.2".to_string());
                         LlmProvider::Ollama { url, model }
                     }
                 }
             };
             let client = LlmClient::new(provider);
-            
-            let web_context = search_results.iter()
+
+            let web_context = search_results
+                .iter()
                 .map(|r| format!("{} - {}\n{}", r.title, r.url, r.snippet))
                 .collect::<Vec<_>>()
                 .join("\n\n");
-            
+
             let system = "You are Phomy, a helpful assistant. Answer the user's question based on the web search results provided. Be accurate and cite sources when possible.";
-            let user = format!("Web search results:\n{}\n\nQuestion: {}", web_context, question);
-            
-            return client.complete(system, &user)
+            let user = format!(
+                "Web search results:\n{}\n\nQuestion: {}",
+                web_context, question
+            );
+
+            return client
+                .complete(system, &user)
                 .await
                 .map_err(|e| format!("LLM error: {}", e));
         }
     }
-    
+
     answer
 }

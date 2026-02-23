@@ -10,10 +10,12 @@ pub mod parakeet_backend;
 pub mod whisper_backend;
 
 use anyhow::{anyhow, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Re-export backend types
-pub use backend::{AsrBackend, AsrBackendType, BackendInfo, TranscriptionResult, TranscriptionSegment};
+pub use backend::{
+    AsrBackend, AsrBackendType, BackendInfo, TranscriptionResult, TranscriptionSegment,
+};
 #[cfg(feature = "parakeet")]
 pub use parakeet_backend::{ParakeetBackend, ParakeetModel};
 pub use whisper_backend::WhisperBackend;
@@ -21,11 +23,11 @@ pub use whisper_backend::WhisperBackend;
 /// Available Whisper model sizes
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WhisperModel {
-    Tiny,    // ~75MB, fastest, lowest quality
-    Base,    // ~142MB, good balance for real-time
-    Small,   // ~466MB, recommended default
-    Medium,  // ~1.5GB, high quality
-    Large,   // ~2.9GB, best quality (slow)
+    Tiny,   // ~75MB, fastest, lowest quality
+    Base,   // ~142MB, good balance for real-time
+    Small,  // ~466MB, recommended default
+    Medium, // ~1.5GB, high quality
+    Large,  // ~2.9GB, best quality (slow)
 }
 
 impl WhisperModel {
@@ -41,11 +43,21 @@ impl WhisperModel {
 
     pub fn download_url(&self) -> &'static str {
         match self {
-            WhisperModel::Tiny => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
-            WhisperModel::Base => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
-            WhisperModel::Small => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-            WhisperModel::Medium => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
-            WhisperModel::Large => "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+            WhisperModel::Tiny => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+            }
+            WhisperModel::Base => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+            }
+            WhisperModel::Small => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+            }
+            WhisperModel::Medium => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
+            }
+            WhisperModel::Large => {
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+            }
         }
     }
 
@@ -54,7 +66,6 @@ impl WhisperModel {
         format!(
             "https://github.com/Phantom-Ear/phantom-ear/releases/download/models/{}.zip",
             self.filename().trim_end_matches(".bin")
-            
         )
     }
 
@@ -144,7 +155,7 @@ impl TranscriptionEngine {
     }
 
     /// Load a model from a file path
-    pub fn load_model(&mut self, model_path: &PathBuf) -> Result<()> {
+    pub fn load_model(&mut self, model_path: &Path) -> Result<()> {
         self.backend.load_model(model_path)
     }
 
@@ -164,7 +175,9 @@ impl TranscriptionEngine {
         audio_samples: &[f32],
         offset_ms: i64,
     ) -> Result<TranscriptionResult> {
-        self.backend.transcribe_with_offset(audio_samples, offset_ms).await
+        self.backend
+            .transcribe_with_offset(audio_samples, offset_ms)
+            .await
     }
 }
 
@@ -194,7 +207,9 @@ pub fn resample_to_16khz(samples: &[f32], source_rate: u32) -> Result<Vec<f32>> 
         return Ok(samples.to_vec());
     }
 
-    use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
+    use rubato::{
+        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+    };
 
     let params = SincInterpolationParameters {
         sinc_len: 256,
@@ -210,10 +225,12 @@ pub fn resample_to_16khz(samples: &[f32], source_rate: u32) -> Result<Vec<f32>> 
         params,
         samples.len(),
         1, // mono
-    ).map_err(|e| anyhow!("Failed to create resampler: {:?}", e))?;
+    )
+    .map_err(|e| anyhow!("Failed to create resampler: {:?}", e))?;
 
     let waves_in = vec![samples.to_vec()];
-    let waves_out = resampler.process(&waves_in, None)
+    let waves_out = resampler
+        .process(&waves_in, None)
         .map_err(|e| anyhow!("Resampling failed: {:?}", e))?;
 
     Ok(waves_out.into_iter().next().unwrap_or_default())
