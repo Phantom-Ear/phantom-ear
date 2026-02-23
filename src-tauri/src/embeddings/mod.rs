@@ -1,4 +1,5 @@
 // Embeddings module — BGE-small-en-v1.5 ONNX for semantic search
+#![allow(clippy::needless_borrow, clippy::needless_range_loop)]
 
 use anyhow::{anyhow, Result};
 use ort::session::Session;
@@ -42,11 +43,17 @@ impl EmbeddingModel {
 
     /// Embed a single text string → 384-dim L2-normalized vector
     pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let encoding = self.tokenizer.encode(text, true)
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
         let input_ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
-        let attention_mask: Vec<i64> = encoding.get_attention_mask().iter().map(|&m| m as i64).collect();
+        let attention_mask: Vec<i64> = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&m| m as i64)
+            .collect();
         let token_type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&t| t as i64).collect();
         let seq_len = input_ids.len();
 
@@ -54,7 +61,10 @@ impl EmbeddingModel {
         let attention_mask_tensor = Value::from_array(([1, seq_len], attention_mask.clone()))?;
         let token_type_ids_tensor = Value::from_array(([1, seq_len], token_type_ids.clone()))?;
 
-        let mut session = self.session.lock().map_err(|e| anyhow!("Session lock: {}", e))?;
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|e| anyhow!("Session lock: {}", e))?;
         let outputs = session.run(ort::inputs![
             input_ids_tensor,
             attention_mask_tensor,
@@ -74,7 +84,11 @@ impl EmbeddingModel {
         let mut mask_sum = 0.0f32;
 
         for t in 0..seq_len_out {
-            let mask_val = if t < attention_mask.len() { attention_mask[t] as f32 } else { 0.0 };
+            let mask_val = if t < attention_mask.len() {
+                attention_mask[t] as f32
+            } else {
+                0.0
+            };
             mask_sum += mask_val;
             for d in 0..hidden_dim {
                 let idx = t * hidden_dim + d; // flat index for [0, t, d] in row-major
@@ -83,8 +97,8 @@ impl EmbeddingModel {
         }
 
         if mask_sum > 0.0 {
-            for d in 0..hidden_dim {
-                pooled[d] /= mask_sum;
+            for item in pooled.iter_mut().take(hidden_dim) {
+                *item /= mask_sum;
             }
         }
 

@@ -3,13 +3,15 @@
 use anyhow::{anyhow, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 
-use crate::asr::{WhisperModel, get_models_dir, get_model_path, is_model_downloaded};
 #[cfg(feature = "parakeet")]
-use crate::asr::parakeet_backend::{ParakeetModel, get_parakeet_models_dir, get_parakeet_model_path, is_parakeet_model_downloaded};
+use crate::asr::parakeet_backend::{
+    get_parakeet_model_path, get_parakeet_models_dir, is_parakeet_model_downloaded, ParakeetModel,
+};
+use crate::asr::{get_model_path, get_models_dir, is_model_downloaded, WhisperModel};
 
 /// Progress event sent to frontend during download
 #[derive(Debug, Clone, Serialize)]
@@ -31,10 +33,7 @@ pub enum DownloadStatus {
 }
 
 /// Download a Whisper model with progress events
-pub async fn download_model(
-    app: &AppHandle,
-    model: WhisperModel,
-) -> Result<PathBuf> {
+pub async fn download_model(app: &AppHandle, model: WhisperModel) -> Result<PathBuf> {
     let model_path = get_model_path(model)?;
     let model_name = format!("{:?}", model);
 
@@ -43,17 +42,38 @@ pub async fn download_model(
         let file_size = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
         let expected_min = model.size_mb() * 1024 * 1024 * 8 / 10; // at least 80% of expected size
         if file_size >= expected_min {
-            log::info!("Model {} already downloaded at {:?} ({} bytes)", model_name, model_path, file_size);
+            log::info!(
+                "Model {} already downloaded at {:?} ({} bytes)",
+                model_name,
+                model_path,
+                file_size
+            );
             emit_progress(app, &model_name, 0, 0, 100.0, DownloadStatus::Completed);
             return Ok(model_path);
         } else {
-            log::warn!("Model {} exists but is too small ({} bytes, expected >= {}), re-downloading", model_name, file_size, expected_min);
+            log::warn!(
+                "Model {} exists but is too small ({} bytes, expected >= {}), re-downloading",
+                model_name,
+                file_size,
+                expected_min
+            );
             let _ = std::fs::remove_file(&model_path);
         }
     }
 
-    log::info!("Starting download of model {} from {}", model_name, model.download_url());
-    emit_progress(app, &model_name, 0, model.size_mb() * 1024 * 1024, 0.0, DownloadStatus::Starting);
+    log::info!(
+        "Starting download of model {} from {}",
+        model_name,
+        model.download_url()
+    );
+    emit_progress(
+        app,
+        &model_name,
+        0,
+        model.size_mb() * 1024 * 1024,
+        0.0,
+        DownloadStatus::Starting,
+    );
 
     // Create HTTP client with timeout
     let client = reqwest::Client::builder()
@@ -61,10 +81,7 @@ pub async fn download_model(
         .build()?;
 
     // Start download
-    let response = client
-        .get(model.download_url())
-        .send()
-        .await?;
+    let response = client.get(model.download_url()).send().await?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -72,7 +89,9 @@ pub async fn download_model(
         return Err(anyhow!("Download failed with status: {}", status));
     }
 
-    let total_size = response.content_length().unwrap_or(model.size_mb() * 1024 * 1024);
+    let total_size = response
+        .content_length()
+        .unwrap_or(model.size_mb() * 1024 * 1024);
 
     // Ensure models directory exists
     let models_dir = get_models_dir()?;
@@ -94,7 +113,14 @@ pub async fn download_model(
         // Emit progress every 100ms to avoid flooding
         if last_progress_update.elapsed() >= std::time::Duration::from_millis(100) {
             let percentage = (downloaded as f32 / total_size as f32) * 100.0;
-            emit_progress(app, &model_name, downloaded, total_size, percentage, DownloadStatus::Downloading);
+            emit_progress(
+                app,
+                &model_name,
+                downloaded,
+                total_size,
+                percentage,
+                DownloadStatus::Downloading,
+            );
             last_progress_update = std::time::Instant::now();
         }
     }
@@ -103,11 +129,17 @@ pub async fn download_model(
     drop(file);
 
     // Validate downloaded file size (detect proxy/firewall interception)
-    let file_size = tokio::fs::metadata(&temp_path).await.map(|m| m.len()).unwrap_or(0);
+    let file_size = tokio::fs::metadata(&temp_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
     let expected_min = model.size_mb() * 1024 * 1024 * 8 / 10; // at least 80% of expected size
     if file_size < expected_min {
         let _ = tokio::fs::remove_file(&temp_path).await;
-        log::warn!("HuggingFace download too small ({} bytes), trying GitHub Releases fallback...", file_size);
+        log::warn!(
+            "HuggingFace download too small ({} bytes), trying GitHub Releases fallback...",
+            file_size
+        );
 
         // Fallback to GitHub Releases (zipped model)
         return download_from_github_fallback(app, model).await;
@@ -116,23 +148,39 @@ pub async fn download_model(
     // Rename temp file to final path
     tokio::fs::rename(&temp_path, &model_path).await?;
 
-    log::info!("Model {} downloaded successfully to {:?} ({} bytes)", model_name, model_path, file_size);
-    emit_progress(app, &model_name, total_size, total_size, 100.0, DownloadStatus::Completed);
+    log::info!(
+        "Model {} downloaded successfully to {:?} ({} bytes)",
+        model_name,
+        model_path,
+        file_size
+    );
+    emit_progress(
+        app,
+        &model_name,
+        total_size,
+        total_size,
+        100.0,
+        DownloadStatus::Completed,
+    );
 
     Ok(model_path)
 }
 
 /// Fallback: download zipped model from GitHub Releases and extract
-async fn download_from_github_fallback(
-    app: &AppHandle,
-    model: WhisperModel,
-) -> Result<PathBuf> {
+async fn download_from_github_fallback(app: &AppHandle, model: WhisperModel) -> Result<PathBuf> {
     let model_path = get_model_path(model)?;
     let model_name = format!("{:?}", model);
     let github_url = model.github_release_url();
 
     log::info!("Trying GitHub Releases fallback: {}", github_url);
-    emit_progress(app, &model_name, 0, model.size_mb() * 1024 * 1024, 0.0, DownloadStatus::Starting);
+    emit_progress(
+        app,
+        &model_name,
+        0,
+        model.size_mb() * 1024 * 1024,
+        0.0,
+        DownloadStatus::Starting,
+    );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3600))
@@ -149,7 +197,9 @@ async fn download_from_github_fallback(
         ));
     }
 
-    let total_size = response.content_length().unwrap_or(model.size_mb() * 1024 * 1024);
+    let total_size = response
+        .content_length()
+        .unwrap_or(model.size_mb() * 1024 * 1024);
 
     let models_dir = get_models_dir()?;
     std::fs::create_dir_all(&models_dir)?;
@@ -168,7 +218,14 @@ async fn download_from_github_fallback(
 
         if last_progress_update.elapsed() >= std::time::Duration::from_millis(100) {
             let percentage = (downloaded as f32 / total_size as f32) * 90.0; // 90% for download, 10% for extract
-            emit_progress(app, &model_name, downloaded, total_size, percentage, DownloadStatus::Downloading);
+            emit_progress(
+                app,
+                &model_name,
+                downloaded,
+                total_size,
+                percentage,
+                DownloadStatus::Downloading,
+            );
             last_progress_update = std::time::Instant::now();
         }
     }
@@ -177,7 +234,10 @@ async fn download_from_github_fallback(
     drop(file);
 
     // Validate zip size
-    let zip_size = tokio::fs::metadata(&zip_path).await.map(|m| m.len()).unwrap_or(0);
+    let zip_size = tokio::fs::metadata(&zip_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
     let expected_min = model.size_mb() * 1024 * 1024 * 5 / 10; // zipped can be ~50%+ of original
     if zip_size < expected_min {
         let _ = tokio::fs::remove_file(&zip_path).await;
@@ -194,32 +254,45 @@ async fn download_from_github_fallback(
     let model_path_clone = model_path.clone();
     let extract_result = tokio::task::spawn_blocking(move || {
         extract_bin_from_zip(&zip_path_clone, &model_path_clone)
-    }).await?;
+    })
+    .await?;
 
     // Clean up zip
     let _ = tokio::fs::remove_file(&zip_path).await;
 
     extract_result?;
 
-    log::info!("Model {} extracted from GitHub zip to {:?}", model_name, model_path);
-    emit_progress(app, &model_name, total_size, total_size, 100.0, DownloadStatus::Completed);
+    log::info!(
+        "Model {} extracted from GitHub zip to {:?}",
+        model_name,
+        model_path
+    );
+    emit_progress(
+        app,
+        &model_name,
+        total_size,
+        total_size,
+        100.0,
+        DownloadStatus::Completed,
+    );
 
     Ok(model_path)
 }
 
 /// Extract a .bin file from a zip archive
 pub fn extract_bin_from_zip(zip_path: &PathBuf, target_path: &PathBuf) -> Result<()> {
-    let file = std::fs::File::open(zip_path)
-        .map_err(|e| anyhow!("Failed to open zip: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| anyhow!("Invalid zip file: {}", e))?;
+    let file = std::fs::File::open(zip_path).map_err(|e| anyhow!("Failed to open zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| anyhow!("Invalid zip file: {}", e))?;
 
     // Find the .bin file inside the zip
-    let bin_index = (0..archive.len()).find(|&i| {
-        archive.by_index(i)
-            .map(|f| f.name().ends_with(".bin"))
-            .unwrap_or(false)
-    }).ok_or_else(|| anyhow!("No .bin model file found inside the zip"))?;
+    let bin_index = (0..archive.len())
+        .find(|&i| {
+            archive
+                .by_index(i)
+                .map(|f| f.name().ends_with(".bin"))
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| anyhow!("No .bin model file found inside the zip"))?;
 
     let mut bin_file = archive.by_index(bin_index)?;
     let mut out_file = std::fs::File::create(target_path)
@@ -227,7 +300,11 @@ pub fn extract_bin_from_zip(zip_path: &PathBuf, target_path: &PathBuf) -> Result
     std::io::copy(&mut bin_file, &mut out_file)
         .map_err(|e| anyhow!("Failed to extract model: {}", e))?;
 
-    log::info!("Extracted '{}' from zip ({} bytes)", bin_file.name(), bin_file.size());
+    log::info!(
+        "Extracted '{}' from zip ({} bytes)",
+        bin_file.name(),
+        bin_file.size()
+    );
     Ok(())
 }
 
@@ -255,32 +332,41 @@ fn emit_progress(
 
 /// Download a Parakeet ONNX model (and its vocab file) with progress events
 #[cfg(feature = "parakeet")]
-pub async fn download_parakeet_model(
-    app: &AppHandle,
-    model: ParakeetModel,
-) -> Result<PathBuf> {
+pub async fn download_parakeet_model(app: &AppHandle, model: ParakeetModel) -> Result<PathBuf> {
     let model_path = get_parakeet_model_path(model)?;
     let model_name = format!("parakeet-{:?}", model).to_lowercase();
 
     // Check if already downloaded
     if model_path.exists() {
-        log::info!("Parakeet model {} already downloaded at {:?}", model_name, model_path);
+        log::info!(
+            "Parakeet model {} already downloaded at {:?}",
+            model_name,
+            model_path
+        );
         emit_progress(app, &model_name, 0, 0, 100.0, DownloadStatus::Completed);
         return Ok(model_path);
     }
 
-    log::info!("Starting download of Parakeet model {} from {}", model_name, model.download_url());
-    emit_progress(app, &model_name, 0, model.size_mb() * 1024 * 1024, 0.0, DownloadStatus::Starting);
+    log::info!(
+        "Starting download of Parakeet model {} from {}",
+        model_name,
+        model.download_url()
+    );
+    emit_progress(
+        app,
+        &model_name,
+        0,
+        model.size_mb() * 1024 * 1024,
+        0.0,
+        DownloadStatus::Starting,
+    );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3600))
         .build()?;
 
     // Download the ONNX model
-    let response = client
-        .get(model.download_url())
-        .send()
-        .await?;
+    let response = client.get(model.download_url()).send().await?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -288,7 +374,9 @@ pub async fn download_parakeet_model(
         return Err(anyhow!("Download failed with status: {}", status));
     }
 
-    let total_size = response.content_length().unwrap_or(model.size_mb() * 1024 * 1024);
+    let total_size = response
+        .content_length()
+        .unwrap_or(model.size_mb() * 1024 * 1024);
 
     // Ensure models directory exists
     let models_dir = get_parakeet_models_dir()?;
@@ -309,7 +397,14 @@ pub async fn download_parakeet_model(
 
         if last_progress_update.elapsed() >= std::time::Duration::from_millis(100) {
             let percentage = (downloaded as f32 / total_size as f32) * 100.0;
-            emit_progress(app, &model_name, downloaded, total_size, percentage, DownloadStatus::Downloading);
+            emit_progress(
+                app,
+                &model_name,
+                downloaded,
+                total_size,
+                percentage,
+                DownloadStatus::Downloading,
+            );
             last_progress_update = std::time::Instant::now();
         }
     }
@@ -325,24 +420,29 @@ pub async fn download_parakeet_model(
     if !vocab_path.exists() {
         log::info!("Downloading vocab file for {}", model_name);
         match client.get(model.vocab_url()).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.bytes().await {
-                    Ok(bytes) => {
-                        if let Err(e) = tokio::fs::write(&vocab_path, &bytes).await {
-                            log::warn!("Failed to write vocab file: {}", e);
-                        } else {
-                            log::info!("Vocab file downloaded to {:?}", vocab_path);
-                        }
+            Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                Ok(bytes) => {
+                    if let Err(e) = tokio::fs::write(&vocab_path, &bytes).await {
+                        log::warn!("Failed to write vocab file: {}", e);
+                    } else {
+                        log::info!("Vocab file downloaded to {:?}", vocab_path);
                     }
-                    Err(e) => log::warn!("Failed to download vocab file: {}", e),
                 }
-            }
+                Err(e) => log::warn!("Failed to download vocab file: {}", e),
+            },
             Ok(resp) => log::warn!("Vocab download returned status: {}", resp.status()),
             Err(e) => log::warn!("Failed to download vocab file: {}", e),
         }
     }
 
-    emit_progress(app, &model_name, total_size, total_size, 100.0, DownloadStatus::Completed);
+    emit_progress(
+        app,
+        &model_name,
+        total_size,
+        total_size,
+        100.0,
+        DownloadStatus::Completed,
+    );
     Ok(model_path)
 }
 
@@ -361,7 +461,7 @@ pub fn get_all_models_status() -> Result<Vec<ModelInfo>> {
     let whisper_models = vec![
         (WhisperModel::Tiny, false),
         (WhisperModel::Base, false),
-        (WhisperModel::Small, true),   // Recommended default
+        (WhisperModel::Small, true), // Recommended default
         (WhisperModel::Medium, false),
         (WhisperModel::Large, false),
     ];
@@ -390,7 +490,9 @@ pub fn get_all_models_status() -> Result<Vec<ModelInfo>> {
 
         for (model, recommended) in parakeet_models {
             models.push(ModelInfo {
-                name: format!("parakeet-{:?}", model).to_lowercase().replace("ctc", "ctc-"),
+                name: format!("parakeet-{:?}", model)
+                    .to_lowercase()
+                    .replace("ctc", "ctc-"),
                 size_mb: model.size_mb(),
                 downloaded: is_parakeet_model_downloaded(model).unwrap_or(false),
                 recommended,
@@ -417,8 +519,10 @@ pub fn delete_model(model: WhisperModel) -> Result<()> {
 // ============================================================================
 
 const BGE_MODEL_DIR: &str = "bge-small-en-v1.5";
-const BGE_MODEL_URL: &str = "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/onnx/model.onnx";
-const BGE_TOKENIZER_URL: &str = "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/tokenizer.json";
+const BGE_MODEL_URL: &str =
+    "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/onnx/model.onnx";
+const BGE_TOKENIZER_URL: &str =
+    "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/tokenizer.json";
 
 /// Get the directory where the embedding model is stored
 pub fn get_embedding_model_dir() -> Result<PathBuf> {
@@ -445,7 +549,14 @@ pub async fn download_embedding_model(app: &AppHandle) -> Result<PathBuf> {
     // Check if already downloaded
     if model_path.exists() && tokenizer_path.exists() {
         log::info!("Embedding model already downloaded at {:?}", model_dir);
-        emit_progress(app, "bge-small-en-v1.5", 0, 0, 100.0, DownloadStatus::Completed);
+        emit_progress(
+            app,
+            "bge-small-en-v1.5",
+            0,
+            0,
+            100.0,
+            DownloadStatus::Completed,
+        );
         return Ok(model_dir);
     }
 
@@ -457,7 +568,14 @@ pub async fn download_embedding_model(app: &AppHandle) -> Result<PathBuf> {
     // Download model.onnx (~33MB)
     if !model_path.exists() {
         log::info!("Downloading BGE-small model.onnx...");
-        emit_progress(app, model_name, 0, 33 * 1024 * 1024, 0.0, DownloadStatus::Starting);
+        emit_progress(
+            app,
+            model_name,
+            0,
+            33 * 1024 * 1024,
+            0.0,
+            DownloadStatus::Starting,
+        );
 
         let response = client.get(BGE_MODEL_URL).send().await?;
         if !response.status().is_success() {
@@ -479,7 +597,14 @@ pub async fn download_embedding_model(app: &AppHandle) -> Result<PathBuf> {
 
             if last_update.elapsed() >= std::time::Duration::from_millis(100) {
                 let pct = (downloaded as f32 / total_size as f32) * 90.0; // 90% for model
-                emit_progress(app, model_name, downloaded, total_size, pct, DownloadStatus::Downloading);
+                emit_progress(
+                    app,
+                    model_name,
+                    downloaded,
+                    total_size,
+                    pct,
+                    DownloadStatus::Downloading,
+                );
                 last_update = std::time::Instant::now();
             }
         }
@@ -513,10 +638,7 @@ pub async fn download_embedding_model(app: &AppHandle) -> Result<PathBuf> {
 
 /// Get download URLs for manual embedding model download
 pub fn get_embedding_model_download_urls() -> (String, String) {
-    (
-        BGE_MODEL_URL.to_string(),
-        BGE_TOKENIZER_URL.to_string(),
-    )
+    (BGE_MODEL_URL.to_string(), BGE_TOKENIZER_URL.to_string())
 }
 
 /// Import embedding model from manually downloaded files
@@ -536,16 +658,19 @@ pub fn import_embedding_model(source_path: &PathBuf) -> Result<PathBuf> {
         extract_embedding_from_zip(source_path, &model_dir)?;
     } else if source_path.is_dir() {
         // Copy from directory
-        log::info!("Importing embedding model from directory: {:?}", source_path);
-        
+        log::info!(
+            "Importing embedding model from directory: {:?}",
+            source_path
+        );
+
         let src_model = source_path.join("model.onnx");
         let src_tokenizer = source_path.join("tokenizer.json");
-        
+
         if src_model.exists() {
             std::fs::copy(&src_model, model_dir.join("model.onnx"))?;
             log::info!("Copied model.onnx");
         }
-        
+
         if src_tokenizer.exists() {
             std::fs::copy(&src_tokenizer, model_dir.join("tokenizer.json"))?;
             log::info!("Copied tokenizer.json");
@@ -569,7 +694,9 @@ pub fn import_embedding_model(source_path: &PathBuf) -> Result<PathBuf> {
     let tokenizer_path = model_dir.join("tokenizer.json");
 
     if !model_path.exists() {
-        return Err(anyhow!("model.onnx not found after import. Please provide both model.onnx and tokenizer.json"));
+        return Err(anyhow!(
+            "model.onnx not found after import. Please provide both model.onnx and tokenizer.json"
+        ));
     }
     if !tokenizer_path.exists() {
         return Err(anyhow!("tokenizer.json not found after import. Please provide both model.onnx and tokenizer.json"));
@@ -580,11 +707,9 @@ pub fn import_embedding_model(source_path: &PathBuf) -> Result<PathBuf> {
 }
 
 /// Extract embedding model files from a zip archive
-fn extract_embedding_from_zip(zip_path: &PathBuf, target_dir: &PathBuf) -> Result<()> {
-    let file = std::fs::File::open(zip_path)
-        .map_err(|e| anyhow!("Failed to open zip: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| anyhow!("Invalid zip file: {}", e))?;
+fn extract_embedding_from_zip(zip_path: &Path, target_dir: &Path) -> Result<()> {
+    let file = std::fs::File::open(zip_path).map_err(|e| anyhow!("Failed to open zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| anyhow!("Invalid zip file: {}", e))?;
 
     let mut found_model = false;
     let mut found_tokenizer = false;

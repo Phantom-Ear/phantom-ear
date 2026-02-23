@@ -29,8 +29,8 @@ impl Default for MelConfig {
         Self {
             sample_rate: 16000,
             n_fft: 512,
-            hop_length: 160,   // 10ms at 16kHz
-            win_length: 400,   // 25ms at 16kHz
+            hop_length: 160, // 10ms at 16kHz
+            win_length: 400, // 25ms at 16kHz
             n_mels: 80,
             f_min: 0.0,
             f_max: 8000.0,

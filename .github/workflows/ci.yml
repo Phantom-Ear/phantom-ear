@@ -1,0 +1,81 @@
+name: CI - Validate PR
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # ============================================================================
+  # Frontend Validation
+  # ============================================================================
+  frontend:
+    name: Frontend Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Type check (Svelte/TypeScript)
+        run: npm run check
+      
+      - name: Build frontend
+        run: npm run build
+
+  # ============================================================================
+  # Rust Validation
+  # ============================================================================
+  rust:
+    name: Rust Check
+    runs-on: ubuntu-latest
+    # Skip if cargo check fails to avoid cascading errors
+    # Skip if cargo check fails to avoid cascading errors
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install system dependencies (for Tauri/whisper)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            libssl-dev \
+            pkg-config \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libasound2-dev
+          
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      
+      - name: Check Rust (compile without building)
+        run: cd src-tauri && cargo check
+      
+      - name: Run Clippy linter
+        run: cd src-tauri && cargo clippy -- -D warnings
+      
+      - name: Check formatting
+        run: cd src-tauri && cargo fmt --check

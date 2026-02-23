@@ -48,7 +48,7 @@ pub struct MeetingListItem {
     pub tags: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SegmentRow {
     pub id: String,
     pub meeting_id: String,
@@ -63,22 +63,6 @@ pub struct SegmentRow {
     pub is_question: bool,
     #[serde(default)]
     pub question_answer: Option<String>,
-}
-
-impl Default for SegmentRow {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            meeting_id: String::new(),
-            time_label: String::new(),
-            text: String::new(),
-            timestamp_ms: 0,
-            speaker_id: None,
-            enhanced_text: None,
-            is_question: false,
-            question_answer: None,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -182,7 +166,7 @@ impl Database {
         // Migration: add summary column if it doesn't exist
         let has_summary: bool = {
             let mut stmt = conn.prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='summary'"
+                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='summary'",
             )?;
             let count: i64 = stmt.query_row([], |row| row.get(0))?;
             count > 0
@@ -207,9 +191,8 @@ impl Database {
 
         // Migration: add tags column to meetings if it doesn't exist
         let has_tags: bool = {
-            let mut stmt = conn.prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='tags'"
-            )?;
+            let mut stmt = conn
+                .prepare("SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='tags'")?;
             let count: i64 = stmt.query_row([], |row| row.get(0))?;
             count > 0
         };
@@ -221,7 +204,7 @@ impl Database {
         // Migration: add metadata columns to meetings if they don't exist
         let has_topics: bool = {
             let mut stmt = conn.prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='topics'"
+                "SELECT COUNT(*) FROM pragma_table_info('meetings') WHERE name='topics'",
             )?;
             let count: i64 = stmt.query_row([], |row| row.get(0))?;
             count > 0
@@ -231,7 +214,7 @@ impl Database {
                 "ALTER TABLE meetings ADD COLUMN topics TEXT;
                  ALTER TABLE meetings ADD COLUMN action_items TEXT;
                  ALTER TABLE meetings ADD COLUMN decisions TEXT;
-                 ALTER TABLE meetings ADD COLUMN participant_count INTEGER DEFAULT 0;"
+                 ALTER TABLE meetings ADD COLUMN participant_count INTEGER DEFAULT 0;",
             )?;
             log::info!("Added metadata columns to meetings table");
         }
@@ -248,7 +231,7 @@ impl Database {
             conn.execute_batch(
                 "ALTER TABLE transcript_segments ADD COLUMN enhanced_text TEXT;
                  ALTER TABLE transcript_segments ADD COLUMN is_question INTEGER DEFAULT 0;
-                 ALTER TABLE transcript_segments ADD COLUMN question_answer TEXT;"
+                 ALTER TABLE transcript_segments ADD COLUMN question_answer TEXT;",
             )?;
             log::info!("Added enhanced_text and question columns to transcript_segments table");
         }
@@ -260,7 +243,7 @@ impl Database {
                 name TEXT NOT NULL,
                 color TEXT NOT NULL,
                 created_at TEXT NOT NULL
-            );"
+            );",
         )?;
 
         Ok(())
@@ -332,7 +315,11 @@ impl Database {
     }
 
     /// Get meetings within a date range (for analytics)
-    pub fn get_meetings_in_range(&self, from_date: &str, to_date: &str) -> Result<Vec<MeetingListItem>> {
+    pub fn get_meetings_in_range(
+        &self,
+        from_date: &str,
+        to_date: &str,
+    ) -> Result<Vec<MeetingListItem>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT m.id, m.title, m.created_at, m.pinned, m.duration_ms, m.tags,
@@ -358,7 +345,11 @@ impl Database {
     }
 
     /// Get meeting count and total duration for analytics
-    pub fn get_meeting_stats(&self, from_date: Option<&str>, to_date: Option<&str>) -> Result<(i64, i64)> {
+    pub fn get_meeting_stats(
+        &self,
+        from_date: Option<&str>,
+        to_date: Option<&str>,
+    ) -> Result<(i64, i64)> {
         let conn = self.conn.lock().unwrap();
         let (count, duration): (i64, i64) = if let (Some(from), Some(to)) = (from_date, to_date) {
             let mut stmt = conn.prepare(
@@ -366,9 +357,8 @@ impl Database {
             )?;
             stmt.query_row(params![from, to], |row| Ok((row.get(0)?, row.get(1)?)))?
         } else {
-            let mut stmt = conn.prepare(
-                "SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM meetings"
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT COUNT(*), COALESCE(SUM(duration_ms), 0) FROM meetings")?;
             stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?)))?
         };
         Ok((count, duration))
@@ -421,9 +411,7 @@ impl Database {
 
     pub fn get_meeting_summary(&self, id: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT summary FROM meetings WHERE id = ?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT summary FROM meetings WHERE id = ?1")?;
         let mut rows = stmt.query_map(params![id], |row| row.get::<_, Option<String>>(0))?;
         match rows.next() {
             Some(Ok(val)) => Ok(val),
@@ -433,7 +421,11 @@ impl Database {
     }
 
     /// Get recent completed meetings with their summaries for Phomy global queries
-    pub fn get_recent_meetings_with_summaries(&self, limit: usize) -> Result<Vec<(String, String, String, Option<String>)>> {
+    #[allow(clippy::type_complexity)]
+    pub fn get_recent_meetings_with_summaries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<(String, String, String, Option<String>)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, created_at, summary FROM meetings
@@ -455,7 +447,12 @@ impl Database {
     }
 
     /// Get segments within a timestamp range for a meeting (for time-based queries)
-    pub fn get_segments_in_range(&self, meeting_id: &str, from_ms: i64, to_ms: i64) -> Result<Vec<SegmentRow>> {
+    pub fn get_segments_in_range(
+        &self,
+        meeting_id: &str,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Vec<SegmentRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id
@@ -564,7 +561,11 @@ impl Database {
     }
 
     /// Update segment enhanced text
-    pub fn update_segment_enhanced_text(&self, segment_id: &str, enhanced_text: Option<&str>) -> Result<()> {
+    pub fn update_segment_enhanced_text(
+        &self,
+        segment_id: &str,
+        enhanced_text: Option<&str>,
+    ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE transcript_segments SET enhanced_text = ?1 WHERE id = ?2",
@@ -574,7 +575,12 @@ impl Database {
     }
 
     /// Update segment question and answer
-    pub fn update_segment_question(&self, segment_id: &str, is_question: bool, answer: Option<&str>) -> Result<()> {
+    pub fn update_segment_question(
+        &self,
+        segment_id: &str,
+        is_question: bool,
+        answer: Option<&str>,
+    ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE transcript_segments SET is_question = ?1, question_answer = ?2 WHERE id = ?3",
@@ -584,7 +590,14 @@ impl Database {
     }
 
     /// Update meeting metadata
-    pub fn update_meeting_metadata(&self, id: &str, topics: Option<&str>, action_items: Option<&str>, decisions: Option<&str>, participant_count: i32) -> Result<()> {
+    pub fn update_meeting_metadata(
+        &self,
+        id: &str,
+        topics: Option<&str>,
+        action_items: Option<&str>,
+        decisions: Option<&str>,
+        participant_count: i32,
+    ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE meetings SET topics = ?1, action_items = ?2, decisions = ?3, participant_count = ?4 WHERE id = ?5",
@@ -625,9 +638,8 @@ impl Database {
     /// List all speakers
     pub fn list_speakers(&self) -> Result<Vec<Speaker>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, color, created_at FROM speakers ORDER BY name ASC"
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id, name, color, created_at FROM speakers ORDER BY name ASC")?;
         let speakers = stmt
             .query_map([], |row| {
                 Ok(Speaker {
@@ -642,7 +654,13 @@ impl Database {
     }
 
     /// Create a new speaker
-    pub fn create_speaker(&self, id: &str, name: &str, color: &str, created_at: &str) -> Result<()> {
+    pub fn create_speaker(
+        &self,
+        id: &str,
+        name: &str,
+        color: &str,
+        created_at: &str,
+    ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO speakers (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -669,27 +687,25 @@ impl Database {
             "UPDATE transcript_segments SET speaker_id = NULL WHERE speaker_id = ?1",
             params![id],
         )?;
-        conn.execute(
-            "DELETE FROM speakers WHERE id = ?1",
-            params![id],
-        )?;
+        conn.execute("DELETE FROM speakers WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     /// Get speaker by ID
     pub fn get_speaker(&self, id: &str) -> Result<Option<Speaker>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, color, created_at FROM speakers WHERE id = ?1"
-        )?;
-        let speaker = stmt.query_row(params![id], |row| {
-            Ok(Speaker {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                color: row.get(2)?,
-                created_at: row.get(3)?,
+        let mut stmt =
+            conn.prepare("SELECT id, name, color, created_at FROM speakers WHERE id = ?1")?;
+        let speaker = stmt
+            .query_row(params![id], |row| {
+                Ok(Speaker {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
             })
-        }).optional()?;
+            .optional()?;
         Ok(speaker)
     }
 
@@ -762,31 +778,32 @@ impl Database {
 
         let mut stmt = conn.prepare(sql)?;
 
-        let rows: Vec<(String, Vec<u8>, String, String, String, String)> = if let Some(mid) = meeting_id {
-            stmt.query_map(params![mid], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Vec<u8>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-        } else {
-            stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Vec<u8>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-        };
+        let rows: Vec<(String, Vec<u8>, String, String, String, String)> =
+            if let Some(mid) = meeting_id {
+                stmt.query_map(params![mid], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+            } else {
+                stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+            };
 
         // Compute cosine similarity in Rust and sort
         let mut scored: Vec<SemanticSearchResult> = rows
@@ -808,13 +825,20 @@ impl Database {
             })
             .collect();
 
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored.truncate(limit);
         Ok(scored)
     }
 
     /// Get segment IDs that don't have embeddings yet for a given meeting
-    pub fn get_unembedded_segment_ids(&self, meeting_id: &str) -> Result<Vec<(String, String, String)>> {
+    pub fn get_unembedded_segment_ids(
+        &self,
+        meeting_id: &str,
+    ) -> Result<Vec<(String, String, String)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT ts.id, ts.time_label, ts.text
@@ -838,16 +862,13 @@ impl Database {
     /// Count embedded vs total segments
     pub fn count_embeddings(&self) -> Result<(u64, u64)> {
         let conn = self.conn.lock().unwrap();
-        let embedded: u64 = conn.query_row(
-            "SELECT COUNT(*) FROM segment_embeddings",
-            [],
-            |row| row.get(0),
-        )?;
-        let total: u64 = conn.query_row(
-            "SELECT COUNT(*) FROM transcript_segments",
-            [],
-            |row| row.get(0),
-        )?;
+        let embedded: u64 =
+            conn.query_row("SELECT COUNT(*) FROM segment_embeddings", [], |row| {
+                row.get(0)
+            })?;
+        let total: u64 = conn.query_row("SELECT COUNT(*) FROM transcript_segments", [], |row| {
+            row.get(0)
+        })?;
         Ok((embedded, total))
     }
 
@@ -866,8 +887,7 @@ impl Database {
 
     pub fn load_settings_json(&self) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT value FROM settings WHERE key = 'app_settings'")?;
+        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = 'app_settings'")?;
         let mut rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         match rows.next() {
             Some(Ok(val)) => Ok(Some(val)),
@@ -898,5 +918,9 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         norm_b += b[i] * b[i];
     }
     let denom = norm_a.sqrt() * norm_b.sqrt();
-    if denom > 0.0 { dot / denom } else { 0.0 }
+    if denom > 0.0 {
+        dot / denom
+    } else {
+        0.0
+    }
 }

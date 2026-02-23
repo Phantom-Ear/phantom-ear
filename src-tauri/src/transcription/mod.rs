@@ -1,7 +1,7 @@
 // Real-time transcription pipeline
 // Processes audio chunks and emits transcription results
 
-use crate::asr::{TranscriptionEngine, resample_to_16khz};
+use crate::asr::{resample_to_16khz, TranscriptionEngine};
 use crate::audio::AudioCapture;
 use serde::Serialize;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub struct TranscriptionConfig {
 impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
-            chunk_duration_secs: 5.0,  // Process every 5 seconds for faster feedback
+            chunk_duration_secs: 5.0, // Process every 5 seconds for faster feedback
             overlap_secs: 0.5,
             silence_threshold: 0.01,
         }
@@ -92,7 +92,9 @@ impl TranscriptionWorker {
 
         // Run transcription
         let engine = self.engine.lock().await;
-        let result = engine.transcribe(&samples_16k).await
+        let result = engine
+            .transcribe(&samples_16k)
+            .await
             .map_err(|e| format!("Transcription failed: {}", e))?;
 
         if result.full_text.trim().is_empty() {

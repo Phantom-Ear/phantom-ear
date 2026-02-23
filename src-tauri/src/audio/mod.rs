@@ -48,7 +48,8 @@ impl AudioCapture {
         let default_device = self.host.default_input_device();
         let default_name = default_device.as_ref().and_then(|d| d.name().ok());
 
-        let devices: Vec<AudioDevice> = self.host
+        let devices: Vec<AudioDevice> = self
+            .host
             .input_devices()?
             .filter_map(|device| {
                 device.name().ok().map(|name| {
@@ -64,11 +65,10 @@ impl AudioCapture {
     /// Select input device by name, or use default if None
     pub fn select_device(&mut self, device_name: Option<&str>) -> Result<()> {
         self.device = match device_name {
-            Some(name) => {
-                self.host
-                    .input_devices()?
-                    .find(|d| d.name().ok().as_deref() == Some(name))
-            }
+            Some(name) => self
+                .host
+                .input_devices()?
+                .find(|d| d.name().ok().as_deref() == Some(name)),
             None => self.host.default_input_device(),
         };
 
@@ -76,7 +76,10 @@ impl AudioCapture {
             return Err(anyhow!("No audio input device found"));
         }
 
-        log::info!("Selected audio device: {:?}", self.device.as_ref().and_then(|d| d.name().ok()));
+        log::info!(
+            "Selected audio device: {:?}",
+            self.device.as_ref().and_then(|d| d.name().ok())
+        );
         Ok(())
     }
 
@@ -90,7 +93,10 @@ impl AudioCapture {
             self.select_device(None)?;
         }
 
-        let device = self.device.as_ref().ok_or_else(|| anyhow!("No device selected"))?;
+        let device = self
+            .device
+            .as_ref()
+            .ok_or_else(|| anyhow!("No device selected"))?;
         let supported_config = device.default_input_config()?;
 
         log::info!("Device config: {:?}", supported_config);
@@ -166,9 +172,11 @@ impl AudioCapture {
                         if let Ok(mut buf) = samples.lock() {
                             if channels > 1 {
                                 for chunk in data.chunks(channels) {
-                                    let mono = chunk.iter()
+                                    let mono = chunk
+                                        .iter()
                                         .map(|&s| s as f32 / i16::MAX as f32)
-                                        .sum::<f32>() / channels as f32;
+                                        .sum::<f32>()
+                                        / channels as f32;
                                     buf.push(mono);
                                 }
                             } else {
@@ -182,9 +190,11 @@ impl AudioCapture {
                             recent.clear();
                             if channels > 1 {
                                 for chunk in data.chunks(channels) {
-                                    let mono = chunk.iter()
+                                    let mono = chunk
+                                        .iter()
                                         .map(|&s| s as f32 / i16::MAX as f32)
-                                        .sum::<f32>() / channels as f32;
+                                        .sum::<f32>()
+                                        / channels as f32;
                                     recent.push(mono);
                                 }
                             } else {

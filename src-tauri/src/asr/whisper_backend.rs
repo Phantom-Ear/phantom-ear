@@ -57,7 +57,8 @@ impl AsrBackend for WhisperBackend {
         let ctx = WhisperContext::new_with_params(
             path.to_str().ok_or_else(|| anyhow!("Invalid path"))?,
             params,
-        ).map_err(|e| anyhow!("Failed to load Whisper model: {:?}", e))?;
+        )
+        .map_err(|e| anyhow!("Failed to load Whisper model: {:?}", e))?;
 
         self.context = Some(Arc::new(Mutex::new(ctx)));
         self.model_path = Some(path.to_path_buf());
@@ -75,7 +76,9 @@ impl AsrBackend for WhisperBackend {
     }
 
     async fn transcribe(&self, audio_samples: &[f32]) -> Result<TranscriptionResult> {
-        let context = self.context.as_ref()
+        let context = self
+            .context
+            .as_ref()
             .ok_or_else(|| anyhow!("No model loaded"))?;
 
         if audio_samples.is_empty() {
@@ -88,7 +91,8 @@ impl AsrBackend for WhisperBackend {
         let ctx = context.lock().await;
 
         // Create a new state for this transcription
-        let mut state = ctx.create_state()
+        let mut state = ctx
+            .create_state()
             .map_err(|e| anyhow!("Failed to create state: {:?}", e))?;
 
         // Configure transcription parameters
@@ -113,29 +117,34 @@ impl AsrBackend for WhisperBackend {
         params.set_suppress_non_speech_tokens(true);
 
         // Run transcription
-        state.full(params, audio_samples)
+        state
+            .full(params, audio_samples)
             .map_err(|e| anyhow!("Transcription failed: {:?}", e))?;
 
         // Extract segments
-        let num_segments = state.full_n_segments()
+        let num_segments = state
+            .full_n_segments()
             .map_err(|e| anyhow!("Failed to get segments: {:?}", e))?;
 
         let mut segments = Vec::new();
         let mut full_text = String::new();
 
         for i in 0..num_segments {
-            let text = state.full_get_segment_text(i)
+            let text = state
+                .full_get_segment_text(i)
                 .map_err(|e| anyhow!("Failed to get segment text: {:?}", e))?;
 
-            let start = state.full_get_segment_t0(i)
+            let start = state
+                .full_get_segment_t0(i)
                 .map_err(|e| anyhow!("Failed to get segment start: {:?}", e))?;
 
-            let end = state.full_get_segment_t1(i)
+            let end = state
+                .full_get_segment_t1(i)
                 .map_err(|e| anyhow!("Failed to get segment end: {:?}", e))?;
 
             // Convert from centiseconds to milliseconds
-            let start_ms = (start as i64) * 10;
-            let end_ms = (end as i64) * 10;
+            let start_ms = start * 10;
+            let end_ms = end * 10;
 
             let trimmed_text = text.trim().to_string();
             if !trimmed_text.is_empty() {

@@ -7,22 +7,14 @@ use x_win::{get_open_windows, WindowInfo};
 
 /// Known browser process names (lowercase)
 const BROWSER_HINTS: &[&str] = &[
-    "chrome",
-    "safari",
-    "firefox",
-    "edge",
-    "brave",
-    "arc",
-    "opera",
-    "chromium",
-    "vivaldi",
+    "chrome", "safari", "firefox", "edge", "brave", "arc", "opera", "chromium", "vivaldi",
 ];
 
 /// Check if an app name or exec name matches any known browser
 fn is_browser(app_name: &str, exec_name: &str) -> bool {
-    BROWSER_HINTS.iter().any(|browser| {
-        app_name.contains(browser) || exec_name.contains(browser)
-    })
+    BROWSER_HINTS
+        .iter()
+        .any(|browser| app_name.contains(browser) || exec_name.contains(browser))
 }
 
 /// Pattern for detecting an active meeting based on window titles
@@ -48,58 +40,41 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     MeetingPattern {
         app_hint: "teams",
         title_patterns: &[
-            "Meeting with",           // "Meeting with John Doe | ..."
-            "Meeting compact view",   // Compact/mini meeting window
-            "| Call |",               // "John Doe | Call | Microsoft Teams"
-            "| call |",               // lowercase variant
+            "Meeting with",         // "Meeting with John Doe | ..."
+            "Meeting compact view", // Compact/mini meeting window
+            "| Call |",             // "John Doe | Call | Microsoft Teams"
+            "| call |",             // lowercase variant
         ],
         display_name: "Microsoft Teams",
     },
     // Zoom: Window title contains "Zoom Meeting" when in an active call
     MeetingPattern {
         app_hint: "zoom",
-        title_patterns: &[
-            "Zoom Meeting",
-            "zoom meeting",
-        ],
+        title_patterns: &["Zoom Meeting", "zoom meeting"],
         display_name: "Zoom",
     },
     // Google Meet: Browser tab with meet.google.com or specific patterns
     MeetingPattern {
         app_hint: "BROWSER", // Only match in browser windows
-        title_patterns: &[
-            "meet.google.com",
-            "Meet -",
-            "Google Meet",
-        ],
+        title_patterns: &["meet.google.com", "Meet -", "Google Meet"],
         display_name: "Google Meet",
     },
     // Webex: Active meeting window
     MeetingPattern {
         app_hint: "webex",
-        title_patterns: &[
-            "Webex Meeting",
-            "Meeting |",
-            "Cisco Webex",
-        ],
+        title_patterns: &["Webex Meeting", "Meeting |", "Cisco Webex"],
         display_name: "Webex",
     },
     // Slack Huddle: When in a huddle
     MeetingPattern {
         app_hint: "slack",
-        title_patterns: &[
-            "Huddle",
-            "huddle",
-        ],
+        title_patterns: &["Huddle", "huddle"],
         display_name: "Slack Huddle",
     },
     // Discord: Voice channel active
     MeetingPattern {
         app_hint: "discord",
-        title_patterns: &[
-            "Voice Connected",
-            "Stage Channel",
-        ],
+        title_patterns: &["Voice Connected", "Stage Channel"],
         display_name: "Discord",
     },
     // =========================================================================
@@ -110,8 +85,8 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     MeetingPattern {
         app_hint: "BROWSER", // Only match browser windows (Chrome, Safari, Firefox, Edge, etc.)
         title_patterns: &[
-            "| Microsoft Teams",      // Browser shows "Meeting | Microsoft Teams"
-            "teams.microsoft.com",    // URL in title
+            "| Microsoft Teams",   // Browser shows "Meeting | Microsoft Teams"
+            "teams.microsoft.com", // URL in title
         ],
         display_name: "Microsoft Teams (Web)",
     },
@@ -119,9 +94,9 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     MeetingPattern {
         app_hint: "BROWSER", // Only match browser windows
         title_patterns: &[
-            "join.zoom.us",           // Zoom web meeting URL
-            "zoom.us/j/",             // Alternative URL format
-            "Zoom Web Client",        // Web client title
+            "join.zoom.us",    // Zoom web meeting URL
+            "zoom.us/j/",      // Alternative URL format
+            "Zoom Web Client", // Web client title
         ],
         display_name: "Zoom (Web)",
     },
@@ -129,8 +104,8 @@ const MEETING_PATTERNS: &[MeetingPattern] = &[
     MeetingPattern {
         app_hint: "BROWSER", // Only match browser windows
         title_patterns: &[
-            "webex.com",              // Webex web URL
-            ".webex.com",             // Subdomain variant
+            "webex.com",  // Webex web URL
+            ".webex.com", // Subdomain variant
         ],
         display_name: "Webex (Web)",
     },
@@ -193,7 +168,11 @@ impl MeetingDetector {
                     self.last_detected = Some(detected);
                     None
                 } else {
-                    log::info!("NEW meeting detected: {} ({})", detected.app_name, detected.process_name);
+                    log::info!(
+                        "NEW meeting detected: {} ({})",
+                        detected.app_name,
+                        detected.process_name
+                    );
                     self.notified_apps.insert(detected.app_name.clone());
                     self.last_detected = Some(detected.clone());
                     Some(detected)
@@ -242,7 +221,8 @@ impl MeetingDetector {
             }
 
             // Check if any title pattern matches
-            let title_matches = pattern.title_patterns
+            let title_matches = pattern
+                .title_patterns
                 .iter()
                 .any(|p| title.contains(&p.to_lowercase()));
 
@@ -341,20 +321,32 @@ impl MeetingDetector {
 
             if !window.title.is_empty() {
                 other_app_with_title = true;
-                log::debug!("Found other app with title: '{}' (app: '{}')", window.title, window.info.name);
+                log::debug!(
+                    "Found other app with title: '{}' (app: '{}')",
+                    window.title,
+                    window.info.name
+                );
             } else {
                 other_app_without_title = true;
-                log::debug!("Found other app WITHOUT title: app='{}', exec='{}'", window.info.name, window.info.exec_name);
+                log::debug!(
+                    "Found other app WITHOUT title: app='{}', exec='{}'",
+                    window.info.name,
+                    window.info.exec_name
+                );
             }
         }
 
         // If we found at least one other app with a title, we likely have permission
         // If we only found apps without titles, permission is likely denied
         if other_app_with_title {
-            log::info!("Screen Recording permission check: GRANTED (found apps with readable titles)");
+            log::info!(
+                "Screen Recording permission check: GRANTED (found apps with readable titles)"
+            );
             true
         } else if other_app_without_title {
-            log::info!("Screen Recording permission check: DENIED (found apps but titles are empty)");
+            log::info!(
+                "Screen Recording permission check: DENIED (found apps but titles are empty)"
+            );
             false
         } else {
             // No other apps running, can't determine
@@ -384,7 +376,9 @@ mod tests {
     fn test_meeting_patterns_defined() {
         assert!(!MEETING_PATTERNS.is_empty());
         // Check that Teams is in the list
-        assert!(MEETING_PATTERNS.iter().any(|p| p.display_name == "Microsoft Teams"));
+        assert!(MEETING_PATTERNS
+            .iter()
+            .any(|p| p.display_name == "Microsoft Teams"));
         // Check that Zoom is in the list
         assert!(MEETING_PATTERNS.iter().any(|p| p.display_name == "Zoom"));
     }

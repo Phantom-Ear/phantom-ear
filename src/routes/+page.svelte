@@ -664,7 +664,9 @@
     embeddingDownloadFailed = false;
 
     try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      // Dynamic import with type annotation for TypeScript
+      const opener = await import("@tauri-apps/plugin-opener");
+      const openUrl = opener.openUrl as (url: string) => Promise<void>;
       const urls = await invoke<{ model_url: string; tokenizer_url: string }>("get_embedding_model_download_urls");
       // Open both URLs in browser - user needs to download both files
       await openUrl(urls.model_url);
