@@ -898,8 +898,27 @@
   async function handleSelectMeeting(id: string) {
     await meetingsStore.selectMeeting(id);
     transcript = meetingsStore.activeTranscript;
+
+    // Clear all AI panel state when switching meetings
+    question = "";
     answer = "";
+    isAsking = false;
     summary = null;
+    isGeneratingSummary = false;
+    persistentSummary = null;
+    showPersistentSummary = false;
+    aiConversation = [];
+    suggestedQuestions = [];
+    showSuggestedQuestions = false;
+
+    // Clear Phomy chat state
+    phomyHistory = [];
+    phomyQuestion = "";
+    phomyAnswer = "";
+    phomyReferences = [];
+    phomyIsAsking = false;
+    expandedRefs = new Set();
+
     currentView = 'home';
     scrollTranscriptToBottom();
   }
