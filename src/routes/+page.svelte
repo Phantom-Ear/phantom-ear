@@ -908,6 +908,12 @@
     suggestedQuestions = [];
     showSuggestedQuestions = false;
 
+    // Clear Phomy chat state
+    phomyHistory = [];
+    phomyQuestion = "";
+    phomyAnswer = "";
+    phomyReferences = [];
+
     currentView = 'home';
     scrollTranscriptToBottom();
   }
