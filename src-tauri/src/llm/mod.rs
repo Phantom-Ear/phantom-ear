@@ -177,6 +177,36 @@ impl LlmClient {
         self.complete(system, &user).await
     }
 
+    /// Generate suggested questions based on transcript context
+    pub async fn generate_suggested_questions(&self, transcript: &str) -> Result<Vec<String>> {
+        let system = "You are a helpful assistant. Generate 3-4 questions about this meeting. \
+                      Return ONLY a JSON array like [\"Q1?\", \"Q2?\", \"Q3?\"]. No other text.";
+        let user = format!("What questions would be useful?\n\n{}", transcript);
+        let response = self.complete(system, &user).await?;
+        
+        // Try to parse JSON, fallback to default questions
+        if let Ok(questions) = serde_json::from_str::<Vec<String>>(&response) {
+            return Ok(questions);
+        }
+        
+        // Try to extract JSON from response
+        if let Some(start) = response.find('[') {
+            if let Some(end) = response.rfind(']') {
+                let json = &response[start..=end];
+                if let Ok(questions) = serde_json::from_str(json) {
+                    return Ok(questions);
+                }
+            }
+        }
+        
+        // Fallback
+        Ok(vec![
+            "What are the key points discussed?".to_string(),
+            "What decisions were made?".to_string(),
+            "What are the action items?".to_string(),
+        ])
+    }
+
     /// Enhance a transcript segment with context from surrounding segments
     pub async fn enhance_segment(&self, prev_text: Option<&str>, current_text: &str, next_text: Option<&str>) -> Result<String> {
         let mut context = String::new();

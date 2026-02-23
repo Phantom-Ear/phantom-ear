@@ -474,7 +474,11 @@ async fn run_transcription_loop_with_storage(
                                                         log::error!("Failed to auto-update meeting title: {}", e);
                                                     } else {
                                                         log::info!("Auto-title saved: {}", title);
-                                                        let _ = app_for_ai.emit("meeting-title-updated", &title);
+                                                        // Emit proper event with meeting_id and title
+                                                        let _ = app_for_ai.emit("meeting-title-updated", serde_json::json!({
+                                                            "meeting_id": mid_for_ai,
+                                                            "title": title
+                                                        }));
                                                     }
                                                 }
                                             }
@@ -1515,6 +1519,44 @@ pub async fn generate_title(
     
     log::info!("Generated title: {}", title);
     Ok(title)
+}
+
+/// Generate suggested questions based on transcript context
+#[tauri::command]
+pub async fn generate_suggested_questions(
+    transcript_context: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    // Get settings and create LLM client
+    let settings = state.settings.lock().await;
+    let provider = match settings.llm_provider.as_str() {
+        "openai" => {
+            let api_key = settings.openai_api_key.clone()
+                .ok_or("OpenAI API key not configured. Please add your API key in Settings.")?;
+            if api_key.is_empty() {
+                return Err("OpenAI API key is empty. Please add your API key in Settings.".to_string());
+            }
+            LlmProvider::OpenAI { api_key }
+        }
+        "ollama" | _ => {
+            let url = settings.ollama_url.clone()
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model = settings.ollama_model.clone()
+                .unwrap_or_else(|| "llama3.2".to_string());
+            LlmProvider::Ollama { url, model }
+        }
+    };
+    drop(settings);
+
+    let client = LlmClient::new(provider);
+    log::info!("Generating suggested questions from transcript context");
+
+    let questions = client.generate_suggested_questions(&transcript_context)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))?;
+    
+    log::info!("Generated {} suggested questions", questions.len());
+    Ok(questions)
 }
 
 // ============================================================================

@@ -43,6 +43,7 @@ pub fn run() {
             commands::get_transcript,
             commands::generate_summary,
             commands::generate_title,
+            commands::generate_suggested_questions,
             commands::get_settings,
             commands::save_settings,
             commands::check_model_status,
