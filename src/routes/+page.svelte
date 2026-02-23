@@ -898,8 +898,16 @@
   async function handleSelectMeeting(id: string) {
     await meetingsStore.selectMeeting(id);
     transcript = meetingsStore.activeTranscript;
+
+    // Clear all AI panel state when switching meetings
     answer = "";
     summary = null;
+    persistentSummary = null;
+    showPersistentSummary = false;
+    aiConversation = [];
+    suggestedQuestions = [];
+    showSuggestedQuestions = false;
+
     currentView = 'home';
     scrollTranscriptToBottom();
   }
