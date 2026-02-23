@@ -40,7 +40,7 @@ jobs:
     name: Rust Check
     runs-on: ubuntu-latest
     # Skip if cargo check fails to avoid cascading errors
-    continue-on-error: true
+    # Skip if cargo check fails to avoid cascading errors
     
     steps:
       - name: Checkout
