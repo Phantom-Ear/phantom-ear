@@ -1,5 +1,8 @@
 name: CI - Validate PR
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches: [main]
