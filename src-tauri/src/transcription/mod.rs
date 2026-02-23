@@ -205,6 +205,12 @@ pub async fn run_transcription_loop(
                     let chunk: Vec<f32> = accumulated_samples.drain(..chunk_samples).collect();
                     let duration_ms = (chunk.len() as f32 / 16.0) as i64;
 
+                    // Emit processing status
+                    let _ = app.emit("transcription-status", serde_json::json!({
+                        "status": "processing",
+                        "chunk_duration_ms": duration_ms
+                    }));
+
                     match eng.transcribe(&chunk).await {
                         Ok(result) => {
                             if !result.full_text.trim().is_empty() {
@@ -230,6 +236,11 @@ pub async fn run_transcription_loop(
                             log::error!("Transcription error: {}", e);
                         }
                     }
+
+                    // Emit idle status after processing
+                    let _ = app.emit("transcription-status", serde_json::json!({
+                        "status": "idle"
+                    }));
                 } else {
                     // No engine, just discard samples
                     accumulated_samples.drain(..chunk_samples);
