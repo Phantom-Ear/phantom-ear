@@ -1,0 +1,84 @@
+name: CI - Validate PR
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # ============================================================================
+  # Frontend Validation
+  # ============================================================================
+  frontend:
+    name: Frontend Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Type check (Svelte/TypeScript)
+        run: npm run check
+      
+      - name: Build frontend
+        run: npm run build
+
+  # ============================================================================
+  # Rust Validation
+  # ============================================================================
+  rust:
+    name: Rust Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      
+      - name: Check Rust (compile without building)
+        run: cd src-tauri && cargo check
+      
+      - name: Run Clippy linter
+        run: cd src-tauri && cargo clippy -- -D warnings
+      
+      - name: Check formatting
+        run: cd src-tauri && cargo fmt --check
+
+  # ============================================================================
+  # Combined Status
+  # ============================================================================
+  validate:
+    name: Validation Complete
+    runs-on: ubuntu-latest
+    needs: [frontend, rust]
+    if: always()
+    
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.rust.result }}" != "success" ]; then
+            echo "Rust validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.frontend.result }}" != "success" ]; then
+            echo "Frontend validation failed"
+            exit 1
+          fi
+          echo "All validations passed!"
