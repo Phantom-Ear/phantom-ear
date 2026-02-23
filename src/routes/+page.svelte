@@ -675,22 +675,35 @@
       });
 
       // Process results
+      const now = Date.now();
+      const BRIEFING_COOLDOWN_MS = 60000; // 60 seconds cooldown per note
+
       for (const result of results) {
         if (result.mentioned && result.briefing) {
+          // Check if there's a recent briefing for this note (within cooldown period)
+          const recentBriefing = noteBriefings.find(
+            b => b.noteId === result.note_id && (now - b.timestamp) < BRIEFING_COOLDOWN_MS
+          );
+
+          if (recentBriefing) {
+            // Skip - already have a recent briefing for this note
+            continue;
+          }
+
           // Update note mention count
           userNotes = userNotes.map(n =>
             n.id === result.note_id
-              ? { ...n, mentionCount: n.mentionCount + 1, lastMentionedAt: Date.now() }
+              ? { ...n, mentionCount: n.mentionCount + 1, lastMentionedAt: now }
               : n
           );
 
           // Add briefing
           const briefing: NoteBriefing = {
-            id: `briefing-${Date.now()}-${result.note_id}`,
+            id: `briefing-${now}-${result.note_id}`,
             noteId: result.note_id,
             noteText: result.note_text,
             briefing: result.briefing,
-            timestamp: Date.now()
+            timestamp: now
           };
           noteBriefings = [...noteBriefings, briefing];
 
