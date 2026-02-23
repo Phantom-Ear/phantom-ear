@@ -900,8 +900,11 @@
     transcript = meetingsStore.activeTranscript;
 
     // Clear all AI panel state when switching meetings
+    question = "";
     answer = "";
+    isAsking = false;
     summary = null;
+    isGeneratingSummary = false;
     persistentSummary = null;
     showPersistentSummary = false;
     aiConversation = [];
@@ -913,6 +916,8 @@
     phomyQuestion = "";
     phomyAnswer = "";
     phomyReferences = [];
+    phomyIsAsking = false;
+    expandedRefs = new Set();
 
     currentView = 'home';
     scrollTranscriptToBottom();
