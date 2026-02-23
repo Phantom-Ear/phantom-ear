@@ -417,8 +417,10 @@
         scrollTranscriptToBottom();
       }
 
-      // Check user notes every 5 segments
-      if (userNotes.length > 0 && transcript.length > 0 && transcript.length % 5 === 0 && transcript.length !== lastNoteCheckCount) {
+      // Check user notes every 5 segments (only during live recording)
+      if (meetingsStore.activeMeetingId === liveRecordingMeetingId &&
+          userNotes.length > 0 && transcript.length > 0 &&
+          transcript.length % 5 === 0 && transcript.length !== lastNoteCheckCount) {
         checkNotesInTranscript();
       }
     });
