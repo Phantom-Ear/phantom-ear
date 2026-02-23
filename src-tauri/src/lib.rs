@@ -40,6 +40,7 @@ pub fn run() {
             commands::pause_recording,
             commands::resume_recording,
             commands::ask_question,
+            commands::check_notes_in_transcript,
             commands::get_transcript,
             commands::generate_summary,
             commands::generate_title,
