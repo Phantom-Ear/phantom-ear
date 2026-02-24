@@ -46,6 +46,9 @@
   // Pause state
   let isPaused = $state(false);
 
+  // Transcription processing state
+  let isProcessingChunk = $state(false);
+
   // Track the meeting ID that is currently being recorded (separate from active/viewed meeting)
   let liveRecordingMeetingId = $state<string | null>(null);
 
@@ -207,6 +210,7 @@
   // Timer and event listener
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let unlistenTranscription: UnlistenFn | null = null;
+  let unlistenTranscriptionStatus: UnlistenFn | null = null;
   let unlistenTray: UnlistenFn | null = null;
   let unlistenMeetingTitleUpdated: UnlistenFn | null = null;
   let unlistenSegmentEnhanced: UnlistenFn | null = null;
@@ -392,6 +396,11 @@
 
   // Subscribe to transcription events
   async function startTranscriptionListener() {
+    // Listen for transcription processing status
+    unlistenTranscriptionStatus = await listen<{ status: string }>("transcription-status", (event) => {
+      isProcessingChunk = event.payload.status === "processing";
+    });
+
     unlistenTranscription = await listen<TranscriptionEvent>("transcription", (event) => {
       const data = event.payload;
 
@@ -490,6 +499,11 @@
       unlistenTranscription();
       unlistenTranscription = null;
     }
+    if (unlistenTranscriptionStatus) {
+      unlistenTranscriptionStatus();
+      unlistenTranscriptionStatus = null;
+    }
+    isProcessingChunk = false;
   }
 
   function handleSetupComplete() {
@@ -1313,6 +1327,15 @@
                     <h2 class="text-sm font-medium text-phantom-ear-text uppercase tracking-wide">Transcript</h2>
                     {#if isRecording}
                       <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-accent/20 text-phantom-ear-accent animate-pulse">Recording</span>
+                      {#if isProcessingChunk}
+                        <span class="px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-500 flex items-center gap-1">
+                          <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                          </svg>
+                          Processing
+                        </span>
+                      {/if}
                     {:else if showPersistentSummary}
                       <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-purple/20 text-phantom-ear-purple">Completed</span>
                     {/if}
@@ -1345,7 +1368,17 @@
                     <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden">
                       {#if transcript.length === 0}
                         <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
-                          <p class="text-sm font-medium">Listening...</p>
+                          {#if isProcessingChunk}
+                            <div class="flex items-center gap-2 mb-2">
+                              <svg class="w-5 h-5 animate-spin text-amber-500" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                              </svg>
+                              <p class="text-sm font-medium text-amber-500">Processing audio...</p>
+                            </div>
+                          {:else}
+                            <p class="text-sm font-medium">Listening...</p>
+                          {/if}
                           <p class="text-xs mt-1 opacity-70">Speech will appear here in real-time</p>
                         </div>
                       {:else}
