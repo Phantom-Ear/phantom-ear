@@ -20,7 +20,7 @@ use crate::storage::{
 use crate::transcription::TranscriptionConfig;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
@@ -159,6 +159,22 @@ pub struct AppState {
     // Meeting detection
     pub meeting_detector: Arc<Mutex<MeetingDetector>>,
     pub detection_running: Arc<AtomicBool>,
+    // Transcription queue depth (number of chunks waiting to be transcribed)
+    pub pending_chunks: Arc<AtomicUsize>,
+}
+
+/// A captured and resampled audio chunk ready for transcription.
+/// Passed from the audio producer to the transcription consumer via mpsc channel.
+#[derive(Debug)]
+struct AudioChunk {
+    /// 16kHz mono f32 PCM samples, already resampled.
+    samples: Vec<f32>,
+    /// Absolute start position in the recording timeline (milliseconds).
+    start_ms: i64,
+    /// Duration of this chunk in milliseconds.
+    duration_ms: i64,
+    /// Monotonic index of this chunk (producer-assigned, used for segment IDs).
+    chunk_index: u64,
 }
 
 // ============================================================================
@@ -236,70 +252,74 @@ pub async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Resu
     *state.is_paused.lock().await = false;
     *is_recording = true;
 
-    // Start transcription loop in background
+    // Start producer-consumer transcription pipeline
+    let (chunk_tx, chunk_rx) = tokio::sync::mpsc::channel::<AudioChunk>(32);
+    state.pending_chunks.store(0, Ordering::SeqCst);
+
+    // Audio producer: captures audio and sends chunks independently of transcription speed
     let audio_capture_arc = state.audio_capture.clone();
-    let engine_arc = state.transcription_engine.clone();
     let is_recording_arc = state.is_recording.clone();
     let is_paused_arc = state.is_paused.clone();
+    let app_producer = app.clone();
+    let pending_prod = state.pending_chunks.clone();
+
+    tauri::async_runtime::spawn(run_audio_producer(
+        app_producer,
+        audio_capture_arc,
+        is_recording_arc,
+        is_paused_arc,
+        TranscriptionConfig::default(),
+        chunk_tx,
+        pending_prod,
+    ));
+
+    // Transcription consumer: processes chunks from queue without blocking audio capture
+    let engine_arc = state.transcription_engine.clone();
     let transcript_arc = state.transcript.clone();
     let db_arc = state.db.clone();
     let emb_model_arc = state.embedding_model.clone();
     let mid = meeting_id.clone();
     let meeting_title = title.clone();
-    let app_clone = app.clone();
-    let settings_arc = state.settings.clone(); // Clone settings
+    let settings_arc = state.settings.clone();
+    let app_consumer = app.clone();
+    let pending_cons = state.pending_chunks.clone();
 
-    tauri::async_runtime::spawn(async move {
-        run_transcription_loop_with_storage(
-            app_clone,
-            audio_capture_arc,
-            engine_arc,
-            is_recording_arc,
-            is_paused_arc,
-            transcript_arc,
-            TranscriptionConfig::default(),
-            db_arc,
-            mid,
-            emb_model_arc,
-            meeting_title,
-            settings_arc,
-        )
-        .await;
-    });
+    tauri::async_runtime::spawn(run_transcription_consumer(
+        app_consumer,
+        engine_arc,
+        transcript_arc,
+        db_arc,
+        mid,
+        emb_model_arc,
+        meeting_title,
+        settings_arc,
+        chunk_rx,
+        pending_cons,
+    ));
 
     log::info!("Recording started with meeting {}", meeting_id);
     Ok(meeting_id)
 }
 
-/// Transcription loop that also stores segments
-#[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-async fn run_transcription_loop_with_storage(
+/// Audio producer: captures audio, accumulates chunks, and sends them to the transcription channel.
+/// Runs independently so audio is never dropped while transcription is busy.
+async fn run_audio_producer(
     app: AppHandle,
     audio_capture: Arc<Mutex<Option<AudioCapture>>>,
-    engine: Arc<Mutex<Option<TranscriptionEngine>>>,
     is_recording: Arc<Mutex<bool>>,
     is_paused: Arc<Mutex<bool>>,
-    transcript: Arc<Mutex<Vec<TranscriptSegment>>>,
     config: TranscriptionConfig,
-    db: Arc<Database>,
-    meeting_id: String,
-    embedding_model: Arc<Mutex<Option<EmbeddingModel>>>,
-    meeting_title: String,
-    settings: Arc<Mutex<Settings>>, // Added settings parameter
+    chunk_tx: tokio::sync::mpsc::Sender<AudioChunk>,
+    pending_chunks: Arc<AtomicUsize>,
 ) {
     use crate::asr::resample_to_16khz;
-    use crate::transcription::TranscriptionEvent;
-    use tauri::Emitter;
 
     let chunk_samples = (config.chunk_duration_secs * 16000.0) as usize;
     let mut accumulated_samples: Vec<f32> = Vec::with_capacity(chunk_samples * 2);
-    let mut segment_counter: u64 = 0;
+    let mut chunk_index: u64 = 0;
     let mut total_duration_ms: i64 = 0;
 
-    log::info!(
-        "Transcription loop started, chunk size: {} samples",
-        chunk_samples
-    );
+    log::info!("Audio producer started, chunk size: {} samples", chunk_samples);
 
     loop {
         // Check if still recording
@@ -310,11 +330,10 @@ async fn run_transcription_loop_with_storage(
             }
         }
 
-        // Check if paused - skip processing but keep loop alive
+        // Check if paused - drain buffer to prevent buildup
         {
             let paused = is_paused.lock().await;
             if *paused {
-                // Drain audio buffer to prevent buildup
                 let capture_guard = audio_capture.lock().await;
                 if let Some(ref capture) = *capture_guard {
                     let _ = capture.get_samples();
@@ -337,25 +356,23 @@ async fn run_transcription_loop_with_storage(
         };
 
         if !samples.is_empty() {
-            // Resample if needed
             let samples_16k = if sample_rate != 16000 {
                 match resample_to_16khz(&samples, sample_rate) {
                     Ok(s) => s,
                     Err(e) => {
                         log::error!("Resampling failed: {}", e);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                         continue;
                     }
                 }
             } else {
                 samples
             };
-
             accumulated_samples.extend(samples_16k);
         }
 
-        // Process if we have enough samples
+        // When we have a full chunk, check silence and send to consumer
         if accumulated_samples.len() >= chunk_samples {
-            // Calculate RMS to check for silence
             let rms: f32 = {
                 let sum_squares: f32 = accumulated_samples[..chunk_samples]
                     .iter()
@@ -365,334 +382,377 @@ async fn run_transcription_loop_with_storage(
             };
 
             if rms >= config.silence_threshold {
-                // Get the engine
-                let engine_guard = engine.lock().await;
-                if let Some(ref eng) = *engine_guard {
-                    // Process chunk
-                    let chunk: Vec<f32> = accumulated_samples.drain(..chunk_samples).collect();
-                    let duration_ms = (chunk.len() as f32 / 16.0) as i64;
+                let chunk_data: Vec<f32> = accumulated_samples.drain(..chunk_samples).collect();
+                let duration_ms = (chunk_data.len() as f32 / 16.0) as i64;
+                chunk_index += 1;
 
-                    match eng.transcribe(&chunk).await {
-                        Ok(result) => {
-                            let text = result.full_text.trim();
-                            if !text.is_empty() {
-                                segment_counter += 1;
+                let chunk = AudioChunk {
+                    samples: chunk_data,
+                    start_ms: total_duration_ms,
+                    duration_ms,
+                    chunk_index,
+                };
 
-                                let seg_id = format!("{}-seg-{}", meeting_id, segment_counter);
-                                let time_label = format_time(total_duration_ms as u64);
+                total_duration_ms += duration_ms;
 
-                                let event = TranscriptionEvent {
-                                    id: seg_id.clone(),
-                                    text: text.to_string(),
-                                    start_ms: total_duration_ms,
-                                    end_ms: total_duration_ms + duration_ms,
-                                    is_partial: false,
-                                };
+                // Increment pending count and notify frontend
+                let count = pending_chunks.fetch_add(1, Ordering::SeqCst) + 1;
+                let _ = app.emit(
+                    "transcription-status",
+                    serde_json::json!({ "status": "queued", "pending_chunks": count }),
+                );
 
-                                // Store in transcript
-                                {
-                                    let mut transcript_guard = transcript.lock().await;
-                                    transcript_guard.push(TranscriptSegment {
-                                        id: event.id.clone(),
-                                        time: time_label.clone(),
-                                        text: event.text.clone(),
-                                        timestamp_ms: total_duration_ms as u64,
-                                    });
-                                }
-
-                                // Persist segment to DB
-                                let seg_id_for_emb = seg_id.clone();
-                                let time_label_for_emb = time_label.clone();
-                                let text_for_emb = text.to_string();
-                                if let Err(e) = db.insert_segment(&SegmentRow {
-                                    id: seg_id,
-                                    meeting_id: meeting_id.clone(),
-                                    time_label,
-                                    text: text.to_string(),
-                                    timestamp_ms: total_duration_ms,
-                                    speaker_id: None,
-                                    enhanced_text: None,
-                                    is_question: false,
-                                    question_answer: None,
-                                }) {
-                                    log::error!("Failed to persist segment: {}", e);
-                                }
-
-                                // Generate embedding in background (non-blocking)
-                                {
-                                    let emb_model = embedding_model.clone();
-                                    let emb_db = db.clone();
-                                    let emb_title = meeting_title.clone();
-                                    tokio::spawn(async move {
-                                        let model_guard = emb_model.lock().await;
-                                        if let Some(ref m) = *model_guard {
-                                            let enriched = embeddings::enrich_segment(
-                                                &emb_title,
-                                                &time_label_for_emb,
-                                                &text_for_emb,
-                                            );
-                                            match m.embed(&enriched) {
-                                                Ok(emb) => {
-                                                    if let Err(e) = emb_db
-                                                        .insert_embedding(&seg_id_for_emb, &emb)
-                                                    {
-                                                        log::error!(
-                                                            "Failed to store embedding: {}",
-                                                            e
-                                                        );
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    log::error!("Embedding failed: {}", e);
-                                                }
-                                            }
-                                        }
-                                    });
-                                }
-
-                                // AI Processing: Auto-title, enhancement, question detection
-                                let current_seg_counter = segment_counter;
-                                let settings_for_ai = settings.clone();
-                                let db_for_ai = db.clone();
-                                let mid_for_ai = meeting_id.clone();
-                                let app_for_ai = app.clone();
-                                let transcript_for_ai = transcript.clone();
-                                tokio::spawn(async move {
-                                    let settings = settings_for_ai.lock().await;
-                                    let enhance_transcripts = settings.enhance_transcripts;
-                                    let detect_questions = settings.detect_questions;
-
-                                    log::info!(
-                                        "AI Processing check - enhance: {}, detect_questions: {}",
-                                        enhance_transcripts,
-                                        detect_questions
-                                    );
-                                    drop(settings);
-
-                                    // Build LLM client
-                                    let llm_provider = {
-                                        let settings = settings_for_ai.lock().await;
-                                        match settings.llm_provider.as_str() {
-                                            "openai" => settings
-                                                .openai_api_key
-                                                .clone()
-                                                .map(|key| LlmProvider::OpenAI { api_key: key }),
-                                            _ => {
-                                                let url =
-                                                    settings.ollama_url.clone().unwrap_or_else(
-                                                        || "http://localhost:11434".to_string(),
-                                                    );
-                                                let model = settings
-                                                    .ollama_model
-                                                    .clone()
-                                                    .unwrap_or_else(|| "llama3.2".to_string());
-                                                Some(LlmProvider::Ollama { url, model })
-                                            }
-                                        }
-                                    };
-
-                                    if let Some(provider) = llm_provider {
-                                        let client = LlmClient::new(provider);
-
-                                        // Auto-title after 10 segments
-                                        if current_seg_counter >= 10 {
-                                            let transcript = transcript_for_ai.lock().await;
-                                            let title_transcript: String = transcript
-                                                .iter()
-                                                .take(10)
-                                                .map(|s| s.text.clone())
-                                                .collect::<Vec<_>>()
-                                                .join(" ");
-                                            drop(transcript);
-
-                                            if let Ok(title) =
-                                                client.generate_title(&title_transcript).await
-                                            {
-                                                let title = title
-                                                    .trim()
-                                                    .trim_matches('"')
-                                                    .trim_matches('\'')
-                                                    .to_string();
-                                                if !title.is_empty() {
-                                                    if let Err(e) = db_for_ai
-                                                        .update_meeting_title(&mid_for_ai, &title)
-                                                    {
-                                                        log::error!("Failed to auto-update meeting title: {}", e);
-                                                    } else {
-                                                        log::info!("Auto-title saved: {}", title);
-                                                        // Emit proper event with meeting_id and title
-                                                        let _ = app_for_ai.emit(
-                                                            "meeting-title-updated",
-                                                            serde_json::json!({
-                                                                "meeting_id": mid_for_ai,
-                                                                "title": title
-                                                            }),
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Transcript enhancement - batch 5 segments together for better context
-                                        if enhance_transcripts
-                                            && current_seg_counter.is_multiple_of(5)
-                                        {
-                                            let transcript = transcript_for_ai.lock().await;
-                                            // Get the last 5 segments (or fewer if not enough)
-                                            let start_idx =
-                                                (current_seg_counter as usize).saturating_sub(5);
-                                            let segments: Vec<String> = transcript
-                                                [start_idx..current_seg_counter as usize]
-                                                .iter()
-                                                .map(|s| s.text.clone())
-                                                .collect();
-                                            let segment_ids: Vec<String> = (start_idx
-                                                ..current_seg_counter as usize)
-                                                .map(|i| format!("{}-seg-{}", mid_for_ai, i + 1))
-                                                .collect();
-                                            drop(transcript);
-
-                                            if segments.len() >= 3 {
-                                                // Send batch to LLM for semantic reconstruction
-                                                if let Ok(enhanced_segments) =
-                                                    client.enhance_batch(&segments).await
-                                                {
-                                                    // The result is a single coherent piece that covers all segments
-                                                    // Emit as one combined enhanced text
-                                                    let combined_text =
-                                                        enhanced_segments.join("\n\n");
-
-                                                    // Store enhanced text for each segment
-                                                    for seg_id in &segment_ids {
-                                                        let _ = db_for_ai
-                                                            .update_segment_enhanced_text(
-                                                                seg_id,
-                                                                Some(&combined_text),
-                                                            );
-                                                    }
-
-                                                    // Emit the combined enhanced text
-                                                    let _ = app_for_ai.emit(
-                                                        "segment-enhanced",
-                                                        serde_json::json!({
-                                                            "segment_ids": segment_ids,
-                                                            "enhanced_text": combined_text
-                                                        }),
-                                                    );
-                                                    log::info!("Emitted semantic reconstruction for segments {}-{}", 
-                                                        segment_ids.first().unwrap_or(&String::new()),
-                                                        segment_ids.last().unwrap_or(&String::new()));
-                                                }
-                                            }
-                                        }
-
-                                        // Question detection - check every segment for questions
-                                        if detect_questions {
-                                            let transcript = transcript_for_ai.lock().await;
-                                            let idx =
-                                                (current_seg_counter as usize).saturating_sub(1);
-                                            let curr_text = transcript
-                                                .get(idx)
-                                                .map(|s| s.text.clone())
-                                                .unwrap_or_default();
-                                            drop(transcript);
-
-                                            log::info!(
-                                                "Checking for question in segment {}",
-                                                current_seg_counter
-                                            );
-
-                                            if let Ok(is_question) =
-                                                client.detect_question(&curr_text).await
-                                            {
-                                                log::info!(
-                                                    "Question detection result: {}",
-                                                    is_question
-                                                );
-                                                if is_question {
-                                                    // Get context for answering
-                                                    let transcript = transcript_for_ai.lock().await;
-                                                    let ctx_start = idx.saturating_sub(5);
-                                                    let ctx_end = (idx + 6).min(transcript.len());
-                                                    let context: String = transcript
-                                                        [ctx_start..ctx_end]
-                                                        .iter()
-                                                        .map(|s| s.text.clone())
-                                                        .collect::<Vec<_>>()
-                                                        .join("\n");
-                                                    drop(transcript);
-
-                                                    if let Ok(answer) = client
-                                                        .answer_question(&context, &curr_text)
-                                                        .await
-                                                    {
-                                                        let seg_id = format!(
-                                                            "{}-seg-{}",
-                                                            mid_for_ai, current_seg_counter
-                                                        );
-                                                        let _ = db_for_ai.update_segment_question(
-                                                            &seg_id,
-                                                            true,
-                                                            Some(&answer),
-                                                        );
-                                                        let _ = app_for_ai.emit(
-                                                            "question-detected",
-                                                            serde_json::json!({
-                                                                "segment_id": seg_id,
-                                                                "question": curr_text,
-                                                                "answer": answer
-                                                            }),
-                                                        );
-                                                        log::info!(
-                                                            "Question detected and emitted: {}",
-                                                            curr_text
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                });
-
-                                total_duration_ms += duration_ms;
-
-                                // Emit to frontend
-                                if let Err(e) = app.emit("transcription", &event) {
-                                    log::error!("Failed to emit transcription: {}", e);
-                                }
-
-                                log::info!("[{}] {}", format_time(event.start_ms as u64), text);
-                            } else {
-                                total_duration_ms += duration_ms;
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Transcription error: {}", e);
-                            total_duration_ms += (chunk_samples as f32 / 16.0) as i64;
-                        }
-                    }
-                } else {
-                    // No engine, discard samples
-                    accumulated_samples.drain(..chunk_samples);
-                    total_duration_ms += (chunk_samples as f32 / 16.0) as i64;
+                // Send to consumer - if channel is closed, stop
+                if chunk_tx.send(chunk).await.is_err() {
+                    log::info!("Chunk channel closed, stopping audio producer");
+                    break;
                 }
             } else {
-                // Silence - discard but keep some overlap
+                // Silence: discard chunk but keep overlap for continuity
                 let keep = (config.overlap_secs * 16000.0) as usize;
                 if accumulated_samples.len() > keep {
-                    let drain_count = accumulated_samples.len() - keep;
-                    accumulated_samples.drain(..drain_count);
+                    accumulated_samples.drain(..(accumulated_samples.len() - keep));
                 }
                 total_duration_ms += (chunk_samples as f32 / 16.0) as i64;
             }
         }
 
-        // Small delay to prevent busy loop
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
+    log::info!("Audio producer stopped after {} chunks", chunk_index);
+    // Dropping chunk_tx here closes the channel, signalling the consumer to drain and stop
+}
+
+/// Transcription consumer: receives audio chunks from the channel and runs Whisper inference.
+/// Processes all queued chunks even after recording stops (drain-not-discard).
+#[allow(clippy::too_many_arguments)]
+async fn run_transcription_consumer(
+    app: AppHandle,
+    engine: Arc<Mutex<Option<TranscriptionEngine>>>,
+    transcript: Arc<Mutex<Vec<TranscriptSegment>>>,
+    db: Arc<Database>,
+    meeting_id: String,
+    embedding_model: Arc<Mutex<Option<EmbeddingModel>>>,
+    meeting_title: String,
+    settings: Arc<Mutex<Settings>>,
+    mut chunk_rx: tokio::sync::mpsc::Receiver<AudioChunk>,
+    pending_chunks: Arc<AtomicUsize>,
+) {
+    use crate::transcription::TranscriptionEvent;
+
+    let mut segment_counter: u64 = 0;
+
+    log::info!("Transcription consumer started");
+
+    while let Some(chunk) = chunk_rx.recv().await {
+        // Notify frontend: transcription in progress
+        let current_pending = pending_chunks.load(Ordering::SeqCst);
+        let _ = app.emit(
+            "transcription-status",
+            serde_json::json!({ "status": "processing", "pending_chunks": current_pending }),
+        );
+
+        // Run Whisper inference
+        let transcription_result = {
+            let engine_guard = engine.lock().await;
+            if let Some(ref eng) = *engine_guard {
+                eng.transcribe(&chunk.samples).await
+            } else {
+                log::warn!("No transcription engine, dropping chunk {}", chunk.chunk_index);
+                let new_count = pending_chunks.load(Ordering::SeqCst).saturating_sub(1);
+                pending_chunks.store(new_count, Ordering::SeqCst);
+                let _ = app.emit(
+                    "transcription-status",
+                    serde_json::json!({ "status": "idle", "pending_chunks": new_count }),
+                );
+                continue;
+            }
+        };
+
+        // Decrement pending count and notify frontend
+        let new_count = pending_chunks.load(Ordering::SeqCst).saturating_sub(1);
+        pending_chunks.store(new_count, Ordering::SeqCst);
+        let _ = app.emit(
+            "transcription-status",
+            serde_json::json!({ "status": "idle", "pending_chunks": new_count }),
+        );
+
+        match transcription_result {
+            Ok(result) => {
+                let text = result.full_text.trim().to_string();
+                if !text.is_empty() {
+                    segment_counter += 1;
+
+                    let seg_id = format!("{}-seg-{}", meeting_id, segment_counter);
+                    let time_label = format_time(chunk.start_ms as u64);
+
+                    let event = TranscriptionEvent {
+                        id: seg_id.clone(),
+                        text: text.clone(),
+                        start_ms: chunk.start_ms,
+                        end_ms: chunk.start_ms + chunk.duration_ms,
+                        is_partial: false,
+                    };
+
+                    // Store in in-memory transcript
+                    {
+                        let mut transcript_guard = transcript.lock().await;
+                        transcript_guard.push(TranscriptSegment {
+                            id: event.id.clone(),
+                            time: time_label.clone(),
+                            text: event.text.clone(),
+                            timestamp_ms: chunk.start_ms as u64,
+                        });
+                    }
+
+                    // Persist segment to DB
+                    let seg_id_for_emb = seg_id.clone();
+                    let time_label_for_emb = time_label.clone();
+                    let text_for_emb = text.clone();
+                    if let Err(e) = db.insert_segment(&SegmentRow {
+                        id: seg_id,
+                        meeting_id: meeting_id.clone(),
+                        time_label,
+                        text: text.clone(),
+                        timestamp_ms: chunk.start_ms,
+                        speaker_id: None,
+                        enhanced_text: None,
+                        is_question: false,
+                        question_answer: None,
+                    }) {
+                        log::error!("Failed to persist segment: {}", e);
+                    }
+
+                    // Generate embedding in background (non-blocking)
+                    {
+                        let emb_model = embedding_model.clone();
+                        let emb_db = db.clone();
+                        let emb_title = meeting_title.clone();
+                        tokio::spawn(async move {
+                            let model_guard = emb_model.lock().await;
+                            if let Some(ref m) = *model_guard {
+                                let enriched = embeddings::enrich_segment(
+                                    &emb_title,
+                                    &time_label_for_emb,
+                                    &text_for_emb,
+                                );
+                                match m.embed(&enriched) {
+                                    Ok(emb) => {
+                                        if let Err(e) =
+                                            emb_db.insert_embedding(&seg_id_for_emb, &emb)
+                                        {
+                                            log::error!("Failed to store embedding: {}", e);
+                                        }
+                                    }
+                                    Err(e) => log::error!("Embedding failed: {}", e),
+                                }
+                            }
+                        });
+                    }
+
+                    // AI processing: auto-title, transcript enhancement, question detection
+                    let current_seg_counter = segment_counter;
+                    let settings_for_ai = settings.clone();
+                    let db_for_ai = db.clone();
+                    let mid_for_ai = meeting_id.clone();
+                    let app_for_ai = app.clone();
+                    let transcript_for_ai = transcript.clone();
+                    tokio::spawn(async move {
+                        let settings = settings_for_ai.lock().await;
+                        let enhance_transcripts = settings.enhance_transcripts;
+                        let detect_questions = settings.detect_questions;
+                        log::info!(
+                            "AI Processing check - enhance: {}, detect_questions: {}",
+                            enhance_transcripts,
+                            detect_questions
+                        );
+                        drop(settings);
+
+                        let llm_provider = {
+                            let settings = settings_for_ai.lock().await;
+                            match settings.llm_provider.as_str() {
+                                "openai" => settings
+                                    .openai_api_key
+                                    .clone()
+                                    .map(|key| LlmProvider::OpenAI { api_key: key }),
+                                _ => {
+                                    let url = settings
+                                        .ollama_url
+                                        .clone()
+                                        .unwrap_or_else(|| "http://localhost:11434".to_string());
+                                    let model = settings
+                                        .ollama_model
+                                        .clone()
+                                        .unwrap_or_else(|| "llama3.2".to_string());
+                                    Some(LlmProvider::Ollama { url, model })
+                                }
+                            }
+                        };
+
+                        if let Some(provider) = llm_provider {
+                            let client = LlmClient::new(provider);
+
+                            // Auto-title after 10 segments
+                            if current_seg_counter >= 10 {
+                                let transcript = transcript_for_ai.lock().await;
+                                let title_transcript: String = transcript
+                                    .iter()
+                                    .take(10)
+                                    .map(|s| s.text.clone())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                drop(transcript);
+
+                                if let Ok(title) =
+                                    client.generate_title(&title_transcript).await
+                                {
+                                    let title = title
+                                        .trim()
+                                        .trim_matches('"')
+                                        .trim_matches('\'')
+                                        .to_string();
+                                    if !title.is_empty() {
+                                        if let Err(e) =
+                                            db_for_ai.update_meeting_title(&mid_for_ai, &title)
+                                        {
+                                            log::error!(
+                                                "Failed to auto-update meeting title: {}",
+                                                e
+                                            );
+                                        } else {
+                                            log::info!("Auto-title saved: {}", title);
+                                            let _ = app_for_ai.emit(
+                                                "meeting-title-updated",
+                                                serde_json::json!({
+                                                    "meeting_id": mid_for_ai,
+                                                    "title": title
+                                                }),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Transcript enhancement - batch 5 segments together for better context
+                            if enhance_transcripts && current_seg_counter.is_multiple_of(5) {
+                                let transcript = transcript_for_ai.lock().await;
+                                let start_idx =
+                                    (current_seg_counter as usize).saturating_sub(5);
+                                let segments: Vec<String> = transcript
+                                    [start_idx..current_seg_counter as usize]
+                                    .iter()
+                                    .map(|s| s.text.clone())
+                                    .collect();
+                                let segment_ids: Vec<String> =
+                                    (start_idx..current_seg_counter as usize)
+                                        .map(|i| format!("{}-seg-{}", mid_for_ai, i + 1))
+                                        .collect();
+                                drop(transcript);
+
+                                if segments.len() >= 3 {
+                                    if let Ok(enhanced_segments) =
+                                        client.enhance_batch(&segments).await
+                                    {
+                                        let combined_text = enhanced_segments.join("\n\n");
+                                        for seg_id in &segment_ids {
+                                            let _ = db_for_ai.update_segment_enhanced_text(
+                                                seg_id,
+                                                Some(&combined_text),
+                                            );
+                                        }
+                                        let _ = app_for_ai.emit(
+                                            "segment-enhanced",
+                                            serde_json::json!({
+                                                "segment_ids": segment_ids,
+                                                "enhanced_text": combined_text
+                                            }),
+                                        );
+                                        log::info!(
+                                            "Emitted semantic reconstruction for segments {}-{}",
+                                            segment_ids.first().unwrap_or(&String::new()),
+                                            segment_ids.last().unwrap_or(&String::new())
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Question detection - check every segment
+                            if detect_questions {
+                                let transcript = transcript_for_ai.lock().await;
+                                let idx = (current_seg_counter as usize).saturating_sub(1);
+                                let curr_text = transcript
+                                    .get(idx)
+                                    .map(|s| s.text.clone())
+                                    .unwrap_or_default();
+                                drop(transcript);
+
+                                log::info!(
+                                    "Checking for question in segment {}",
+                                    current_seg_counter
+                                );
+
+                                if let Ok(is_question) =
+                                    client.detect_question(&curr_text).await
+                                {
+                                    log::info!("Question detection result: {}", is_question);
+                                    if is_question {
+                                        let transcript = transcript_for_ai.lock().await;
+                                        let ctx_start = idx.saturating_sub(5);
+                                        let ctx_end = (idx + 6).min(transcript.len());
+                                        let context: String = transcript[ctx_start..ctx_end]
+                                            .iter()
+                                            .map(|s| s.text.clone())
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+                                        drop(transcript);
+
+                                        if let Ok(answer) =
+                                            client.answer_question(&context, &curr_text).await
+                                        {
+                                            let seg_id = format!(
+                                                "{}-seg-{}",
+                                                mid_for_ai, current_seg_counter
+                                            );
+                                            let _ = db_for_ai.update_segment_question(
+                                                &seg_id,
+                                                true,
+                                                Some(&answer),
+                                            );
+                                            let _ = app_for_ai.emit(
+                                                "question-detected",
+                                                serde_json::json!({
+                                                    "segment_id": seg_id,
+                                                    "question": curr_text,
+                                                    "answer": answer
+                                                }),
+                                            );
+                                            log::info!(
+                                                "Question detected and emitted: {}",
+                                                curr_text
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    // Emit transcription segment to frontend
+                    if let Err(e) = app.emit("transcription", &event) {
+                        log::error!("Failed to emit transcription: {}", e);
+                    }
+                    log::info!("[{}] {}", format_time(chunk.start_ms as u64), text);
+                }
+            }
+            Err(e) => {
+                log::error!("Transcription error for chunk {}: {}", chunk.chunk_index, e);
+            }
+        }
+    }
+
     log::info!(
-        "Transcription loop ended, processed {} segments",
+        "Transcription consumer finished, processed {} segments",
         segment_counter
     );
 }

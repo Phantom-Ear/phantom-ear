@@ -48,6 +48,7 @@
 
   // Transcription processing state
   let isProcessingChunk = $state(false);
+  let pendingChunks = $state(0);
 
   // Track the meeting ID that is currently being recorded (separate from active/viewed meeting)
   let liveRecordingMeetingId = $state<string | null>(null);
@@ -389,8 +390,9 @@
   // Subscribe to transcription events
   async function startTranscriptionListener() {
     // Listen for transcription processing status
-    unlistenTranscriptionStatus = await listen<{ status: string }>("transcription-status", (event) => {
-      isProcessingChunk = event.payload.status === "processing";
+    unlistenTranscriptionStatus = await listen<{ status: string; pending_chunks: number }>("transcription-status", (event) => {
+      isProcessingChunk = event.payload.status !== "idle";
+      pendingChunks = event.payload.pending_chunks ?? 0;
     });
 
     unlistenTranscription = await listen<TranscriptionEvent>("transcription", (event) => {
@@ -489,6 +491,7 @@
       unlistenTranscriptionStatus = null;
     }
     isProcessingChunk = false;
+    pendingChunks = 0;
   }
 
   function handleSetupComplete() {
@@ -1210,7 +1213,7 @@
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                           </svg>
-                          Processing
+                          {pendingChunks > 1 ? `${pendingChunks} chunks pending` : 'Processing'}
                         </span>
                       {/if}
                     {:else if showPersistentSummary}
@@ -1251,7 +1254,9 @@
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                               </svg>
-                              <p class="text-sm font-medium text-amber-500">Processing audio...</p>
+                              <p class="text-sm font-medium text-amber-500">
+                                {pendingChunks > 1 ? `Processing... (${pendingChunks} chunks queued)` : 'Processing audio...'}
+                              </p>
                             </div>
                           {:else}
                             <p class="text-sm font-medium">Listening...</p>
