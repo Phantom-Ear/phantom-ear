@@ -330,7 +330,11 @@ impl LlmClient {
 
     /// Check if user notes are mentioned in the transcript
     /// Returns which notes are mentioned and a brief summary of what was said
-    pub async fn check_notes(&self, notes: &[String], transcript_context: &str) -> Result<Vec<NoteMatch>> {
+    pub async fn check_notes(
+        &self,
+        notes: &[String],
+        transcript_context: &str,
+    ) -> Result<Vec<NoteMatch>> {
         if notes.is_empty() {
             return Ok(vec![]);
         }

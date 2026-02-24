@@ -206,10 +206,13 @@ pub async fn run_transcription_loop(
                     let duration_ms = (chunk.len() as f32 / 16.0) as i64;
 
                     // Emit processing status
-                    let _ = app.emit("transcription-status", serde_json::json!({
-                        "status": "processing",
-                        "chunk_duration_ms": duration_ms
-                    }));
+                    let _ = app.emit(
+                        "transcription-status",
+                        serde_json::json!({
+                            "status": "processing",
+                            "chunk_duration_ms": duration_ms
+                        }),
+                    );
 
                     match eng.transcribe(&chunk).await {
                         Ok(result) => {
@@ -238,9 +241,12 @@ pub async fn run_transcription_loop(
                     }
 
                     // Emit idle status after processing
-                    let _ = app.emit("transcription-status", serde_json::json!({
-                        "status": "idle"
-                    }));
+                    let _ = app.emit(
+                        "transcription-status",
+                        serde_json::json!({
+                            "status": "idle"
+                        }),
+                    );
                 } else {
                     // No engine, just discard samples
                     accumulated_samples.drain(..chunk_samples);

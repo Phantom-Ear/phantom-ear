@@ -88,7 +88,7 @@
   let expandedRefs = $state<Set<number>>(new Set());
   
   // Chat container reference for auto-scroll
-  let phomyChatContainer: HTMLDivElement | null = null;
+  let phomyChatContainer: HTMLDivElement | null = $state(null);
 
   // Embedding state
   let embeddingModelLoaded = $state(false);
@@ -215,7 +215,7 @@
   let unlistenMeetingTitleUpdated: UnlistenFn | null = null;
   let unlistenSegmentEnhanced: UnlistenFn | null = null;
   let unlistenQuestionDetected: UnlistenFn | null = null;
-  let transcriptContainer: HTMLDivElement | null = null;
+  let transcriptContainer: HTMLDivElement | null = $state(null);
 
   // Live AI insights during recording
   let liveEnhancedText = $state("");
@@ -639,10 +639,21 @@
     isAsking = true;
     answer = "";
 
+    const meetingId = isRecording ? liveRecordingMeetingId : meetingsStore.activeMeetingId;
+
     try {
-      answer = await invoke<string>("ask_question", { question: q, meetingId: isRecording ? null : meetingsStore.activeMeetingId });
+      answer = await invoke<string>("ask_question", { question: q, meetingId });
       // Add to conversation history
       aiConversation = [...aiConversation, { question: q, answer }];
+
+      // Save to database if we have a meeting ID
+      if (meetingId) {
+        try {
+          await invoke("save_conversation_item", { meetingId, question: q, answer });
+        } catch (e) {
+          console.error("Failed to save conversation:", e);
+        }
+      }
     } catch (e) {
       answer = `Error: ${e}`;
     }
@@ -1017,7 +1028,7 @@
     await meetingsStore.selectMeeting(id);
     transcript = meetingsStore.activeTranscript;
 
-    // Clear all AI panel state when switching meetings
+    // Clear all AI panel state before loading new meeting's data
     question = "";
     answer = "";
     isAsking = false;
@@ -1028,6 +1039,31 @@
     aiConversation = [];
     suggestedQuestions = [];
     showSuggestedQuestions = false;
+
+    // Load saved summary if available
+    try {
+      const savedSummary = await invoke<Summary | null>("get_saved_summary", { meetingId: id });
+      if (savedSummary) {
+        persistentSummary = savedSummary;
+        showPersistentSummary = true;
+      } else {
+        persistentSummary = null;
+        showPersistentSummary = false;
+      }
+    } catch (e) {
+      console.error("Failed to load summary:", e);
+      persistentSummary = null;
+      showPersistentSummary = false;
+    }
+
+    // Load saved conversations if available
+    try {
+      const savedConversations = await invoke<Array<{ question: string; answer: string }>>("get_meeting_conversations", { meetingId: id });
+      aiConversation = savedConversations.map(c => ({ question: c.question, answer: c.answer }));
+    } catch (e) {
+      console.error("Failed to load conversations:", e);
+      aiConversation = [];
+    }
 
     // Clear Phomy chat state
     phomyHistory = [];
@@ -1652,7 +1688,7 @@
                           <div class="mb-3 p-3 bg-phantom-ear-bg rounded-lg">
                             <div class="flex items-center justify-between mb-2">
                               <span class="text-[10px] text-phantom-ear-purple uppercase">Suggested</span>
-                              <button onclick={() => showSuggestedQuestions = false} class="text-phantom-ear-text-muted hover:text-phantom-ear-text"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                              <button onclick={() => showSuggestedQuestions = false} aria-label="Close suggested questions" class="text-phantom-ear-text-muted hover:text-phantom-ear-text"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
                             </div>
                             <div class="space-y-1.5">
                               {#each suggestedQuestions as q}<button onclick={() => askSuggestedQuestion(q)} class="w-full text-left p-2 text-xs rounded-lg bg-phantom-ear-surface hover:bg-phantom-ear-accent/10 text-phantom-ear-text">{q}</button>{/each}
@@ -2067,6 +2103,7 @@
         </div>
         <button
           onclick={() => showEmbeddingManualDownload = false}
+          aria-label="Close"
           class="p-2 rounded-lg hover:bg-phantom-ear-surface-hover transition-colors"
         >
           <svg class="w-5 h-5 text-phantom-ear-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
