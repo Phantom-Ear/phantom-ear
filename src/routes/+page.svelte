@@ -1028,10 +1028,17 @@
     await meetingsStore.selectMeeting(id);
     transcript = meetingsStore.activeTranscript;
 
-    // Clear transient state
-    answer = "";
+    // Clear all AI panel state before loading new meeting's data
     question = "";
+    answer = "";
+    isAsking = false;
     summary = null;
+    isGeneratingSummary = false;
+    persistentSummary = null;
+    showPersistentSummary = false;
+    aiConversation = [];
+    suggestedQuestions = [];
+    showSuggestedQuestions = false;
 
     // Load saved summary if available
     try {
@@ -1057,17 +1064,6 @@
       console.error("Failed to load conversations:", e);
       aiConversation = [];
     }
-    // Clear all AI panel state when switching meetings
-    question = "";
-    answer = "";
-    isAsking = false;
-    summary = null;
-    isGeneratingSummary = false;
-    persistentSummary = null;
-    showPersistentSummary = false;
-    aiConversation = [];
-    suggestedQuestions = [];
-    showSuggestedQuestions = false;
 
     // Clear Phomy chat state
     phomyHistory = [];
