@@ -604,10 +604,21 @@
     isAsking = true;
     answer = "";
 
+    const meetingId = isRecording ? liveRecordingMeetingId : meetingsStore.activeMeetingId;
+
     try {
-      answer = await invoke<string>("ask_question", { question: q, meetingId: isRecording ? null : meetingsStore.activeMeetingId });
+      answer = await invoke<string>("ask_question", { question: q, meetingId });
       // Add to conversation history
       aiConversation = [...aiConversation, { question: q, answer }];
+
+      // Save to database if we have a meeting ID
+      if (meetingId) {
+        try {
+          await invoke("save_conversation_item", { meetingId, question: q, answer });
+        } catch (e) {
+          console.error("Failed to save conversation:", e);
+        }
+      }
     } catch (e) {
       answer = `Error: ${e}`;
     }
@@ -898,8 +909,37 @@
   async function handleSelectMeeting(id: string) {
     await meetingsStore.selectMeeting(id);
     transcript = meetingsStore.activeTranscript;
+
+    // Clear transient state
     answer = "";
+    question = "";
     summary = null;
+
+    // Load saved summary if available
+    try {
+      const savedSummary = await invoke<Summary | null>("get_saved_summary", { meetingId: id });
+      if (savedSummary) {
+        persistentSummary = savedSummary;
+        showPersistentSummary = true;
+      } else {
+        persistentSummary = null;
+        showPersistentSummary = false;
+      }
+    } catch (e) {
+      console.error("Failed to load summary:", e);
+      persistentSummary = null;
+      showPersistentSummary = false;
+    }
+
+    // Load saved conversations if available
+    try {
+      const savedConversations = await invoke<Array<{ question: string; answer: string }>>("get_meeting_conversations", { meetingId: id });
+      aiConversation = savedConversations.map(c => ({ question: c.question, answer: c.answer }));
+    } catch (e) {
+      console.error("Failed to load conversations:", e);
+      aiConversation = [];
+    }
+
     currentView = 'home';
     scrollTranscriptToBottom();
   }

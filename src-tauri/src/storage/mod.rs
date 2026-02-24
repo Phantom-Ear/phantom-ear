@@ -83,6 +83,13 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConversationItem {
+    pub question: String,
+    pub answer: String,
+    pub created_at: String,
+}
+
 // ============================================================================
 // Database
 // ============================================================================
@@ -243,6 +250,18 @@ impl Database {
                 name TEXT NOT NULL,
                 color TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );",
+        )?;
+
+        // Create meeting_conversations table for storing Q&A history
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS meeting_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
             );",
         )?;
 
@@ -418,6 +437,47 @@ impl Database {
             Some(Err(e)) => Err(e.into()),
             None => Ok(None),
         }
+    }
+
+    // ========================================================================
+    // Conversations (Q&A history per meeting)
+    // ========================================================================
+
+    pub fn save_conversation_item(
+        &self,
+        meeting_id: &str,
+        question: &str,
+        answer: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO meeting_conversations (meeting_id, question, answer, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![meeting_id, question, answer, created_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_meeting_conversations(
+        &self,
+        meeting_id: &str,
+    ) -> Result<Vec<ConversationItem>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT question, answer, created_at FROM meeting_conversations
+             WHERE meeting_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![meeting_id], |row| {
+                Ok(ConversationItem {
+                    question: row.get(0)?,
+                    answer: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     /// Get recent completed meetings with their summaries for Phomy global queries

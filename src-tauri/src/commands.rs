@@ -1710,14 +1710,81 @@ pub async fn generate_summary(
 
     // If no structured parsing worked, put everything in overview
     if overview.is_empty() && action_items.is_empty() && key_points.is_empty() {
-        overview = summary_text;
+        overview = summary_text.clone();
     }
 
-    Ok(Summary {
-        overview,
-        action_items,
-        key_points,
-    })
+    let summary = Summary {
+        overview: overview.clone(),
+        action_items: action_items.clone(),
+        key_points: key_points.clone(),
+    };
+
+    // Save summary to database if we have a meeting_id
+    let effective_meeting_id = if meeting_id.is_some() {
+        meeting_id.clone()
+    } else {
+        state.active_meeting_id.lock().await.clone()
+    };
+
+    if let Some(mid) = effective_meeting_id {
+        // Serialize the summary as JSON for storage
+        if let Ok(summary_json) = serde_json::to_string(&summary) {
+            if let Err(e) = state.db.save_meeting_summary(&mid, &summary_json) {
+                log::warn!("Failed to save summary to DB: {}", e);
+            } else {
+                log::info!("Summary saved to database for meeting {}", mid);
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
+/// Get saved summary for a meeting
+#[tauri::command]
+pub async fn get_saved_summary(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<Summary>, String> {
+    let summary_json = state
+        .db
+        .get_meeting_summary(&meeting_id)
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    match summary_json {
+        Some(json) => {
+            let summary: Summary =
+                serde_json::from_str(&json).map_err(|e| format!("Parse error: {}", e))?;
+            Ok(Some(summary))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Save a conversation item (Q&A) for a meeting
+#[tauri::command]
+pub async fn save_conversation_item(
+    meeting_id: String,
+    question: String,
+    answer: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .save_conversation_item(&meeting_id, &question, &answer)
+        .map_err(|e| format!("DB error: {}", e))
+}
+
+/// Get saved conversations for a meeting
+#[tauri::command]
+pub async fn get_meeting_conversations(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::storage::ConversationItem>, String> {
+    state
+        .db
+        .get_meeting_conversations(&meeting_id)
+        .map_err(|e| format!("DB error: {}", e))
 }
 
 /// Generate meeting title using LLM

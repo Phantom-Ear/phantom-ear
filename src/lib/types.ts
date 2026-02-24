@@ -127,5 +127,11 @@ export interface EmbeddingStatus {
   total_segments: number;
 }
 
+export interface ConversationItem {
+  question: string;
+  answer: string;
+  created_at: string;
+}
+
 export type View = 'home' | 'phomy' | 'settings';
 export type Theme = 'light' | 'dark';
