@@ -327,6 +327,78 @@ impl LlmClient {
         serde_json::from_str(json_str)
             .map_err(|e| anyhow!("Failed to parse metadata JSON: {} - raw: {}", e, json_str))
     }
+
+    /// Check if user notes are mentioned in the transcript
+    /// Returns which notes are mentioned and a brief summary of what was said
+    pub async fn check_notes(
+        &self,
+        notes: &[String],
+        transcript_context: &str,
+    ) -> Result<Vec<NoteMatch>> {
+        if notes.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let notes_list = notes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| format!("{}. {}", i, n))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let system = "You analyze meeting transcripts to detect when user-provided topics are discussed.
+
+Given a list of notes and recent transcript text, identify which notes are mentioned (directly or indirectly).
+
+For each mentioned note, provide a 1-sentence briefing of what was said.
+
+Return ONLY valid JSON array:
+[{\"index\": 0, \"mentioned\": true, \"briefing\": \"The team discussed X.\"}]
+
+If nothing mentioned, return: []";
+
+        let user = format!(
+            "Notes:\n{}\n\nTranscript:\n{}",
+            notes_list, transcript_context
+        );
+
+        let result = self.complete(system, &user).await?;
+
+        // Try to parse JSON from result
+        let json_str = result.trim();
+        let json_str = json_str
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        // Try direct parse first
+        if let Ok(matches) = serde_json::from_str::<Vec<NoteMatch>>(json_str) {
+            return Ok(matches.into_iter().filter(|m| m.mentioned).collect());
+        }
+
+        // Try to extract JSON array from response
+        if let Some(start) = json_str.find('[') {
+            if let Some(end) = json_str.rfind(']') {
+                let json = &json_str[start..=end];
+                if let Ok(matches) = serde_json::from_str::<Vec<NoteMatch>>(json) {
+                    return Ok(matches.into_iter().filter(|m| m.mentioned).collect());
+                }
+            }
+        }
+
+        // Return empty if parsing fails
+        Ok(vec![])
+    }
+}
+
+/// Result of checking a single note against transcript
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NoteMatch {
+    pub index: usize,
+    pub mentioned: bool,
+    #[serde(default)]
+    pub briefing: Option<String>,
 }
 
 /// Metadata extracted from a meeting

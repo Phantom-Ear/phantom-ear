@@ -25,7 +25,8 @@
 [**Download**](#-download) • [**Features**](#-features) • [**How It Works**](#-how-it-works) • [**Tech Stack**](#-architecture) • [**Development**](#-development)
 
 <br/>
-<img width="1088" height="735" alt="image" src="https://github.com/user-attachments/assets/5feb825d-cf7f-4f3d-a8b1-4c781bb5a391" />
+<img width="1117" height="970" alt="image" src="https://github.com/user-attachments/assets/18563c7c-07dc-47ea-ad28-5ab9c25af249" />
+<img width="1117" height="970" alt="image" src="https://github.com/user-attachments/assets/a3dc61ce-b0ef-4020-8727-c5b0fa9b655f" />
 
 </div>
 
