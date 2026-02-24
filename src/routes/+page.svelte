@@ -16,7 +16,7 @@
   import MeetingNotification from "$lib/components/MeetingNotification.svelte";
   import { meetingsStore } from "$lib/stores/meetings.svelte";
   import { createShortcutHandler, isMacOS } from "$lib/utils/keyboard";
-  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker } from "$lib/types";
+  import type { ModelStatus, TranscriptSegment, TranscriptionEvent, Settings as SettingsType, ModelInfo, View, Summary, SemanticSearchResult, Speaker, UserNote, NoteBriefing, NoteCheckResult } from "$lib/types";
 
   // Markdown rendering helper
   function renderMarkdown(text: string): string {
@@ -45,6 +45,9 @@
 
   // Pause state
   let isPaused = $state(false);
+
+  // Transcription processing state
+  let isProcessingChunk = $state(false);
 
   // Track the meeting ID that is currently being recorded (separate from active/viewed meeting)
   let liveRecordingMeetingId = $state<string | null>(null);
@@ -108,6 +111,14 @@
 
   // AI Conversation history
   let aiConversation = $state<{question: string, answer: string}[]>([]);
+
+  // User Notes state (for tracking topics during recording)
+  let userNotes = $state<UserNote[]>([]);
+  let noteBriefings = $state<NoteBriefing[]>([]);
+  let notesCollapsed = $state(true);
+  let noteInput = $state("");
+  let isCheckingNotes = $state(false);
+  let lastNoteCheckCount = $state(0); // Track segment count for note checking
 
   // Export state
   let exportCopied = $state(false);
@@ -199,6 +210,7 @@
   // Timer and event listener
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let unlistenTranscription: UnlistenFn | null = null;
+  let unlistenTranscriptionStatus: UnlistenFn | null = null;
   let unlistenTray: UnlistenFn | null = null;
   let unlistenMeetingTitleUpdated: UnlistenFn | null = null;
   let unlistenSegmentEnhanced: UnlistenFn | null = null;
@@ -384,6 +396,11 @@
 
   // Subscribe to transcription events
   async function startTranscriptionListener() {
+    // Listen for transcription processing status
+    unlistenTranscriptionStatus = await listen<{ status: string }>("transcription-status", (event) => {
+      isProcessingChunk = event.payload.status === "processing";
+    });
+
     unlistenTranscription = await listen<TranscriptionEvent>("transcription", (event) => {
       const data = event.payload;
 
@@ -407,6 +424,13 @@
       // Auto-scroll to bottom (only if viewing the live recording)
       if (meetingsStore.activeMeetingId === liveRecordingMeetingId) {
         scrollTranscriptToBottom();
+      }
+
+      // Check user notes every 5 segments (only during live recording)
+      if (meetingsStore.activeMeetingId === liveRecordingMeetingId &&
+          userNotes.length > 0 && transcript.length > 0 &&
+          transcript.length % 5 === 0 && transcript.length !== lastNoteCheckCount) {
+        checkNotesInTranscript();
       }
     });
   }
@@ -475,6 +499,11 @@
       unlistenTranscription();
       unlistenTranscription = null;
     }
+    if (unlistenTranscriptionStatus) {
+      unlistenTranscriptionStatus();
+      unlistenTranscriptionStatus = null;
+    }
+    isProcessingChunk = false;
   }
 
   function handleSetupComplete() {
@@ -555,6 +584,12 @@
         transcriptPanelCollapsed = false;
         aiPanelCollapsed = false;
         aiConversation = [];
+        // Clear user notes for new recording
+        userNotes = [];
+        noteBriefings = [];
+        noteInput = "";
+        lastNoteCheckCount = 0;
+        notesCollapsed = true;
 
         // Start listening for transcription events BEFORE starting recording
         await startTranscriptionListener();
@@ -626,6 +661,89 @@
     isAsking = false;
     question = "";
     scrollTranscriptToBottom();
+  }
+
+  // User Notes functions
+  function addUserNote() {
+    if (!noteInput.trim() || userNotes.length >= 10) return;
+    const note: UserNote = {
+      id: `note-${Date.now()}`,
+      text: noteInput.trim(),
+      createdAt: Date.now(),
+      mentionCount: 0,
+      lastMentionedAt: null
+    };
+    userNotes = [...userNotes, note];
+    noteInput = "";
+  }
+
+  function deleteUserNote(noteId: string) {
+    userNotes = userNotes.filter(n => n.id !== noteId);
+    // Also remove related briefings
+    noteBriefings = noteBriefings.filter(b => b.noteId !== noteId);
+  }
+
+  async function checkNotesInTranscript() {
+    if (userNotes.length === 0 || transcript.length < 5 || isCheckingNotes) return;
+
+    // Get recent transcript context (last 10 segments)
+    const recentSegments = transcript.slice(-10);
+    const context = recentSegments.map(s => `[${s.time}] ${s.text}`).join("\n");
+
+    if (!context.trim()) return;
+
+    isCheckingNotes = true;
+
+    try {
+      const notes = userNotes.map(n => ({ id: n.id, text: n.text }));
+      const results = await invoke<NoteCheckResult[]>("check_notes_in_transcript", {
+        notes,
+        transcriptContext: context
+      });
+
+      // Process results
+      const now = Date.now();
+      const BRIEFING_COOLDOWN_MS = 60000; // 60 seconds cooldown per note
+
+      for (const result of results) {
+        if (result.mentioned && result.briefing) {
+          // Check if there's a recent briefing for this note (within cooldown period)
+          const recentBriefing = noteBriefings.find(
+            b => b.noteId === result.note_id && (now - b.timestamp) < BRIEFING_COOLDOWN_MS
+          );
+
+          if (recentBriefing) {
+            // Skip - already have a recent briefing for this note
+            continue;
+          }
+
+          // Update note mention count
+          userNotes = userNotes.map(n =>
+            n.id === result.note_id
+              ? { ...n, mentionCount: n.mentionCount + 1, lastMentionedAt: now }
+              : n
+          );
+
+          // Add briefing
+          const briefing: NoteBriefing = {
+            id: `briefing-${now}-${result.note_id}`,
+            noteId: result.note_id,
+            noteText: result.note_text,
+            briefing: result.briefing,
+            timestamp: now
+          };
+          noteBriefings = [...noteBriefings, briefing];
+
+          // Auto-expand notes panel when there's a new briefing
+          notesCollapsed = false;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check notes:", e);
+    }
+
+    isCheckingNotes = false;
+    lastNoteCheckCount = transcript.length;
   }
 
   async function generateSummary() {
@@ -939,6 +1057,25 @@
       console.error("Failed to load conversations:", e);
       aiConversation = [];
     }
+    // Clear all AI panel state when switching meetings
+    question = "";
+    answer = "";
+    isAsking = false;
+    summary = null;
+    isGeneratingSummary = false;
+    persistentSummary = null;
+    showPersistentSummary = false;
+    aiConversation = [];
+    suggestedQuestions = [];
+    showSuggestedQuestions = false;
+
+    // Clear Phomy chat state
+    phomyHistory = [];
+    phomyQuestion = "";
+    phomyAnswer = "";
+    phomyReferences = [];
+    phomyIsAsking = false;
+    expandedRefs = new Set();
 
     currentView = 'home';
     scrollTranscriptToBottom();
@@ -1230,6 +1367,15 @@
                     <h2 class="text-sm font-medium text-phantom-ear-text uppercase tracking-wide">Transcript</h2>
                     {#if isRecording}
                       <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-accent/20 text-phantom-ear-accent animate-pulse">Recording</span>
+                      {#if isProcessingChunk}
+                        <span class="px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-500 flex items-center gap-1">
+                          <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                          </svg>
+                          Processing
+                        </span>
+                      {/if}
                     {:else if showPersistentSummary}
                       <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-purple/20 text-phantom-ear-purple">Completed</span>
                     {/if}
@@ -1262,7 +1408,17 @@
                     <div class="flex-1 glass rounded-xl border border-phantom-ear-border overflow-hidden">
                       {#if transcript.length === 0}
                         <div class="flex flex-col items-center justify-center h-full text-phantom-ear-text-muted">
-                          <p class="text-sm font-medium">Listening...</p>
+                          {#if isProcessingChunk}
+                            <div class="flex items-center gap-2 mb-2">
+                              <svg class="w-5 h-5 animate-spin text-amber-500" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                              </svg>
+                              <p class="text-sm font-medium text-amber-500">Processing audio...</p>
+                            </div>
+                          {:else}
+                            <p class="text-sm font-medium">Listening...</p>
+                          {/if}
                           <p class="text-xs mt-1 opacity-70">Speech will appear here in real-time</p>
                         </div>
                       {:else}
@@ -1334,6 +1490,130 @@
                                 </div>
                               </div>
                             {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    {/if}
+
+                    <!-- User Notes Section - Show during recording or if there are notes/briefings -->
+                    {#if isRecording || userNotes.length > 0 || noteBriefings.length > 0}
+                      <div class="mb-4 bg-phantom-ear-surface rounded-lg border border-amber-500/30 shrink-0 overflow-hidden">
+                        <!-- Notes Header - Always visible -->
+                        <button
+                          onclick={() => notesCollapsed = !notesCollapsed}
+                          class="w-full p-3 flex items-center justify-between hover:bg-phantom-ear-bg/50 transition-colors"
+                        >
+                          <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            <span class="text-xs font-medium text-amber-500 uppercase tracking-wide">My Notes</span>
+                            {#if userNotes.length > 0}
+                              <span class="px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-500">{userNotes.length}</span>
+                            {/if}
+                            {#if noteBriefings.length > 0}
+                              <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-purple/20 text-phantom-ear-purple animate-pulse">
+                                {noteBriefings.length} alert{noteBriefings.length > 1 ? 's' : ''}
+                              </span>
+                            {/if}
+                          </div>
+                          <svg class="w-4 h-4 text-phantom-ear-text-muted transition-transform {notesCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+
+                        {#if !notesCollapsed}
+                          <div class="px-3 pb-3 space-y-3">
+                            <!-- Add Note Input - Only during recording -->
+                            {#if isRecording}
+                              <form onsubmit={(e) => { e.preventDefault(); addUserNote(); }} class="flex gap-2">
+                                <input
+                                  type="text"
+                                  bind:value={noteInput}
+                                  placeholder="Add a topic to track..."
+                                  maxlength="100"
+                                  class="flex-1 px-3 py-2 text-sm bg-phantom-ear-bg border border-phantom-ear-border rounded-lg text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-amber-500"
+                                  disabled={userNotes.length >= 10}
+                                />
+                                <button
+                                  type="submit"
+                                  disabled={!noteInput.trim() || userNotes.length >= 10}
+                                  class="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 rounded-lg text-amber-500 disabled:opacity-50 transition-colors"
+                                >
+                                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                  </svg>
+                                </button>
+                              </form>
+
+                              {#if userNotes.length >= 10}
+                                <p class="text-xs text-amber-500/70">Maximum 10 notes reached</p>
+                              {/if}
+                            {/if}
+
+                            <!-- Notes List -->
+                            {#if userNotes.length > 0}
+                              <div class="space-y-1.5 max-h-32 overflow-y-auto">
+                                {#each userNotes as note (note.id)}
+                                  <div class="flex items-center gap-2 p-2 bg-phantom-ear-bg rounded-lg group">
+                                    <span class="w-2 h-2 rounded-full {note.mentionCount > 0 ? 'bg-phantom-ear-accent' : 'bg-phantom-ear-text-muted/30'}"></span>
+                                    <span class="flex-1 text-sm text-phantom-ear-text truncate">{note.text}</span>
+                                    {#if note.mentionCount > 0}
+                                      <span class="px-1.5 py-0.5 text-[10px] rounded bg-phantom-ear-accent/20 text-phantom-ear-accent">
+                                        x{note.mentionCount}
+                                      </span>
+                                    {/if}
+                                    {#if isRecording}
+                                      <button
+                                        onclick={() => deleteUserNote(note.id)}
+                                        class="p-1 text-phantom-ear-text-muted hover:text-phantom-ear-danger opacity-0 group-hover:opacity-100 transition-opacity"
+                                      >
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                      </button>
+                                    {/if}
+                                  </div>
+                                {/each}
+                              </div>
+                            {:else if isRecording}
+                              <p class="text-xs text-phantom-ear-text-muted text-center py-2">
+                                Add notes to track topics during the meeting
+                              </p>
+                            {/if}
+
+                            <!-- Recent Briefings -->
+                            {#if noteBriefings.length > 0}
+                              <div class="border-t border-phantom-ear-border pt-3 mt-2">
+                                <h4 class="text-[10px] font-medium text-phantom-ear-purple uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                  </svg>
+                                  Recent Alerts
+                                </h4>
+                                <div class="space-y-2 max-h-40 overflow-y-auto">
+                                  {#each noteBriefings.slice(-3).reverse() as briefing (briefing.id)}
+                                    <div class="p-2 bg-phantom-ear-bg rounded-lg">
+                                      <p class="text-[10px] text-phantom-ear-purple font-medium mb-1">"{briefing.noteText}"</p>
+                                      <p class="text-xs text-phantom-ear-text leading-relaxed">{briefing.briefing}</p>
+                                      <p class="text-[10px] text-phantom-ear-text-muted mt-1">
+                                        {new Date(briefing.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      </p>
+                                    </div>
+                                  {/each}
+                                </div>
+                              </div>
+                            {/if}
+
+                            {#if isCheckingNotes}
+                              <div class="flex items-center justify-center gap-2 py-1">
+                                <svg class="w-3 h-3 animate-spin text-amber-500" fill="none" viewBox="0 0 24 24">
+                                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                </svg>
+                                <span class="text-[10px] text-phantom-ear-text-muted">Checking notes...</span>
+                              </div>
+                            {/if}
                           </div>
                         {/if}
                       </div>

@@ -1284,6 +1284,88 @@ pub async fn ask_question(
         .map_err(|e| format!("LLM error: {}", e))
 }
 
+/// Check if user notes are mentioned in the transcript
+/// Returns which notes were mentioned with briefings
+#[tauri::command]
+pub async fn check_notes_in_transcript(
+    notes: Vec<NoteInput>,
+    transcript_context: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<NoteCheckResult>, String> {
+    if notes.is_empty() || transcript_context.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Get settings and create LLM client
+    let settings = state.settings.lock().await;
+    let provider = match settings.llm_provider.as_str() {
+        "openai" => {
+            let api_key = settings
+                .openai_api_key
+                .clone()
+                .ok_or("OpenAI API key not configured")?;
+            if api_key.is_empty() {
+                return Err("OpenAI API key is empty".to_string());
+            }
+            LlmProvider::OpenAI { api_key }
+        }
+        "ollama" | _ => {
+            let url = settings
+                .ollama_url
+                .clone()
+                .unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model = settings
+                .ollama_model
+                .clone()
+                .unwrap_or_else(|| "llama3.2".to_string());
+            LlmProvider::Ollama { url, model }
+        }
+    };
+    drop(settings);
+
+    let client = LlmClient::new(provider);
+
+    // Extract just the text from notes
+    let note_texts: Vec<String> = notes.iter().map(|n| n.text.clone()).collect();
+
+    // Call LLM to check notes
+    let matches = client
+        .check_notes(&note_texts, &transcript_context)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))?;
+
+    // Convert matches to results with note IDs
+    let results: Vec<NoteCheckResult> = matches
+        .into_iter()
+        .filter_map(|m| {
+            notes.get(m.index).map(|note| NoteCheckResult {
+                note_id: note.id.clone(),
+                note_text: note.text.clone(),
+                mentioned: m.mentioned,
+                briefing: m.briefing,
+            })
+        })
+        .collect();
+
+    Ok(results)
+}
+
+/// Input structure for note checking
+#[derive(Debug, Deserialize)]
+pub struct NoteInput {
+    pub id: String,
+    pub text: String,
+}
+
+/// Result of checking a note against transcript
+#[derive(Debug, Serialize)]
+pub struct NoteCheckResult {
+    pub note_id: String,
+    pub note_text: String,
+    pub mentioned: bool,
+    pub briefing: Option<String>,
+}
+
 /// Phomy: intelligent assistant that routes queries appropriately
 /// Handles recency, time-based, meeting recall, and global summary queries
 #[tauri::command]

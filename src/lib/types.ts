@@ -131,6 +131,27 @@ export interface ConversationItem {
   question: string;
   answer: string;
   created_at: string;
+export interface UserNote {
+  id: string;
+  text: string;
+  createdAt: number;
+  mentionCount: number;
+  lastMentionedAt: number | null;
+}
+
+export interface NoteBriefing {
+  id: string;
+  noteId: string;
+  noteText: string;
+  briefing: string;
+  timestamp: number;
+}
+
+export interface NoteCheckResult {
+  note_id: string;
+  note_text: string;
+  mentioned: boolean;
+  briefing: string | null;
 }
 
 export type View = 'home' | 'phomy' | 'settings';
