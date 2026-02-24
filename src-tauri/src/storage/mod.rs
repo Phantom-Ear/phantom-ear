@@ -459,10 +459,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_meeting_conversations(
-        &self,
-        meeting_id: &str,
-    ) -> Result<Vec<ConversationItem>> {
+    pub fn get_meeting_conversations(&self, meeting_id: &str) -> Result<Vec<ConversationItem>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT question, answer, created_at FROM meeting_conversations
