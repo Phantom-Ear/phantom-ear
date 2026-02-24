@@ -131,6 +131,7 @@ export interface ConversationItem {
   question: string;
   answer: string;
   created_at: string;
+}
 export interface UserNote {
   id: string;
   text: string;
