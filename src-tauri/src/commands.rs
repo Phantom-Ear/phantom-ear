@@ -319,7 +319,10 @@ async fn run_audio_producer(
     let mut chunk_index: u64 = 0;
     let mut total_duration_ms: i64 = 0;
 
-    log::info!("Audio producer started, chunk size: {} samples", chunk_samples);
+    log::info!(
+        "Audio producer started, chunk size: {} samples",
+        chunk_samples
+    );
 
     loop {
         // Check if still recording
@@ -446,11 +449,14 @@ async fn run_transcription_consumer(
     log::info!("Transcription consumer started");
 
     while let Some(chunk) = chunk_rx.recv().await {
-        // Notify frontend: transcription in progress
-        let current_pending = pending_chunks.load(Ordering::SeqCst);
+        // Decrement pending count first so both "processing" and "idle" events
+        // reflect the accurate remaining queue depth (avoids off-by-1 in the UI).
+        let new_count = pending_chunks.load(Ordering::SeqCst).saturating_sub(1);
+        pending_chunks.store(new_count, Ordering::SeqCst);
+
         let _ = app.emit(
             "transcription-status",
-            serde_json::json!({ "status": "processing", "pending_chunks": current_pending }),
+            serde_json::json!({ "status": "processing", "pending_chunks": new_count }),
         );
 
         // Run Whisper inference
@@ -459,9 +465,10 @@ async fn run_transcription_consumer(
             if let Some(ref eng) = *engine_guard {
                 eng.transcribe(&chunk.samples).await
             } else {
-                log::warn!("No transcription engine, dropping chunk {}", chunk.chunk_index);
-                let new_count = pending_chunks.load(Ordering::SeqCst).saturating_sub(1);
-                pending_chunks.store(new_count, Ordering::SeqCst);
+                log::warn!(
+                    "No transcription engine, dropping chunk {}",
+                    chunk.chunk_index
+                );
                 let _ = app.emit(
                     "transcription-status",
                     serde_json::json!({ "status": "idle", "pending_chunks": new_count }),
@@ -470,9 +477,6 @@ async fn run_transcription_consumer(
             }
         };
 
-        // Decrement pending count and notify frontend
-        let new_count = pending_chunks.load(Ordering::SeqCst).saturating_sub(1);
-        pending_chunks.store(new_count, Ordering::SeqCst);
         let _ = app.emit(
             "transcription-status",
             serde_json::json!({ "status": "idle", "pending_chunks": new_count }),
@@ -604,9 +608,7 @@ async fn run_transcription_consumer(
                                     .join(" ");
                                 drop(transcript);
 
-                                if let Ok(title) =
-                                    client.generate_title(&title_transcript).await
-                                {
+                                if let Ok(title) = client.generate_title(&title_transcript).await {
                                     let title = title
                                         .trim()
                                         .trim_matches('"')
@@ -637,17 +639,16 @@ async fn run_transcription_consumer(
                             // Transcript enhancement - batch 5 segments together for better context
                             if enhance_transcripts && current_seg_counter.is_multiple_of(5) {
                                 let transcript = transcript_for_ai.lock().await;
-                                let start_idx =
-                                    (current_seg_counter as usize).saturating_sub(5);
+                                let start_idx = (current_seg_counter as usize).saturating_sub(5);
                                 let segments: Vec<String> = transcript
                                     [start_idx..current_seg_counter as usize]
                                     .iter()
                                     .map(|s| s.text.clone())
                                     .collect();
-                                let segment_ids: Vec<String> =
-                                    (start_idx..current_seg_counter as usize)
-                                        .map(|i| format!("{}-seg-{}", mid_for_ai, i + 1))
-                                        .collect();
+                                let segment_ids: Vec<String> = (start_idx
+                                    ..current_seg_counter as usize)
+                                    .map(|i| format!("{}-seg-{}", mid_for_ai, i + 1))
+                                    .collect();
                                 drop(transcript);
 
                                 if segments.len() >= 3 {
@@ -692,9 +693,7 @@ async fn run_transcription_consumer(
                                     current_seg_counter
                                 );
 
-                                if let Ok(is_question) =
-                                    client.detect_question(&curr_text).await
-                                {
+                                if let Ok(is_question) = client.detect_question(&curr_text).await {
                                     log::info!("Question detection result: {}", is_question);
                                     if is_question {
                                         let transcript = transcript_for_ai.lock().await;
