@@ -449,10 +449,11 @@ async fn run_transcription_consumer(
     log::info!("Transcription consumer started");
 
     while let Some(chunk) = chunk_rx.recv().await {
-        // Decrement pending count first so both "processing" and "idle" events
-        // reflect the accurate remaining queue depth (avoids off-by-1 in the UI).
-        let new_count = pending_chunks.load(Ordering::SeqCst).saturating_sub(1);
-        pending_chunks.store(new_count, Ordering::SeqCst);
+        // Atomically decrement so the producer can never observe a torn value
+        // between load and store. fetch_sub returns the old value, so subtract 1.
+        let new_count = pending_chunks
+            .fetch_sub(1, Ordering::SeqCst)
+            .saturating_sub(1);
 
         let _ = app.emit(
             "transcription-status",
@@ -597,8 +598,8 @@ async fn run_transcription_consumer(
                         if let Some(provider) = llm_provider {
                             let client = LlmClient::new(provider);
 
-                            // Auto-title after 10 segments
-                            if current_seg_counter >= 10 {
+                            // Auto-title exactly once at segment 10
+                            if current_seg_counter == 10 {
                                 let transcript = transcript_for_ai.lock().await;
                                 let title_transcript: String = transcript
                                     .iter()
