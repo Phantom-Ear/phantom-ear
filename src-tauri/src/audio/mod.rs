@@ -1,6 +1,9 @@
 // Audio capture module
 // Handles audio input capture for macOS and Windows
 
+pub mod system;
+pub use system::SystemAudioCapture;
+
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, SampleFormat, Stream, StreamConfig};

@@ -91,4 +91,5 @@ parakeet = ["rustfft"]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSError"] }
 block2 = "0.6"
+screencapturekit = "1"
 

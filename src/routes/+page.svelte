@@ -412,6 +412,7 @@
         time: formatTimeMs(data.start_ms),
         text: data.text,
         timestamp_ms: data.start_ms,
+        source: data.source,
       };
 
       // Add to local transcript
@@ -1427,7 +1428,12 @@
                           {#each transcript as segment (segment.id)}
                             <div data-segment-id={segment.id} class="flex gap-3 animate-fade-in p-2 rounded-lg hover:bg-phantom-ear-surface/50 transition-colors">
                               <span class="text-xs text-phantom-ear-accent font-mono shrink-0 pt-0.5">{segment.time}</span>
-                              <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
+                              <div class="flex flex-col gap-0.5 min-w-0">
+                                <span class={`text-[10px] font-semibold uppercase tracking-wide ${segment.source === 'system' ? 'text-violet-400' : 'text-phantom-ear-accent'}`}>
+                                  {segment.source === 'system' ? 'Them' : 'You'}
+                                </span>
+                                <p class="text-sm leading-relaxed text-phantom-ear-text">{segment.text}</p>
+                              </div>
                             </div>
                           {/each}
                         </div>

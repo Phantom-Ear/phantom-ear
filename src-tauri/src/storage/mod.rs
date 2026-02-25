@@ -56,6 +56,9 @@ pub struct SegmentRow {
     pub text: String,
     pub timestamp_ms: i64,
     pub speaker_id: Option<String>,
+    /// "mic" = local user, "system" = remote via SCK. Defaults to "mic" for old rows.
+    #[serde(default)]
+    pub source: Option<String>,
     // AI enhanced fields
     #[serde(default)]
     pub enhanced_text: Option<String>,
@@ -241,6 +244,21 @@ impl Database {
                  ALTER TABLE transcript_segments ADD COLUMN question_answer TEXT;",
             )?;
             log::info!("Added enhanced_text and question columns to transcript_segments table");
+        }
+
+        // Migration: add source column to transcript_segments if it doesn't exist
+        let has_source: bool = {
+            let mut stmt = conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('transcript_segments') WHERE name='source'",
+            )?;
+            let count: i64 = stmt.query_row([], |row| row.get(0))?;
+            count > 0
+        };
+        if !has_source {
+            conn.execute_batch(
+                "ALTER TABLE transcript_segments ADD COLUMN source TEXT DEFAULT 'mic';",
+            )?;
+            log::info!("Added source column to transcript_segments table");
         }
 
         // Create speakers table if it doesn't exist
@@ -526,6 +544,7 @@ impl Database {
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
                     speaker_id: row.get(5)?,
+                    source: None,
                     enhanced_text: None,
                     is_question: false,
                     question_answer: None,
@@ -557,6 +576,7 @@ impl Database {
                     enhanced_text: None,
                     is_question: false,
                     question_answer: None,
+                    source: None,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -578,8 +598,8 @@ impl Database {
     pub fn insert_segment(&self, seg: &SegmentRow) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO transcript_segments (id, meeting_id, time_label, text, timestamp_ms, speaker_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![seg.id, seg.meeting_id, seg.time_label, seg.text, seg.timestamp_ms, seg.speaker_id],
+            "INSERT INTO transcript_segments (id, meeting_id, time_label, text, timestamp_ms, speaker_id, source) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![seg.id, seg.meeting_id, seg.time_label, seg.text, seg.timestamp_ms, seg.speaker_id, seg.source],
         )?;
         Ok(())
     }
@@ -587,7 +607,7 @@ impl Database {
     pub fn get_segments(&self, meeting_id: &str) -> Result<Vec<SegmentRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id, enhanced_text, is_question, question_answer FROM transcript_segments WHERE meeting_id = ?1 ORDER BY timestamp_ms ASC",
+            "SELECT id, meeting_id, time_label, text, timestamp_ms, speaker_id, source, enhanced_text, is_question, question_answer FROM transcript_segments WHERE meeting_id = ?1 ORDER BY timestamp_ms ASC",
         )?;
         let segments = stmt
             .query_map(params![meeting_id], |row| {
@@ -598,9 +618,10 @@ impl Database {
                     text: row.get(3)?,
                     timestamp_ms: row.get(4)?,
                     speaker_id: row.get(5)?,
-                    enhanced_text: row.get(6)?,
-                    is_question: row.get::<_, i32>(7)? != 0,
-                    question_answer: row.get(8)?,
+                    source: row.get(6)?,
+                    enhanced_text: row.get(7)?,
+                    is_question: row.get::<_, i32>(8)? != 0,
+                    question_answer: row.get(9)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
