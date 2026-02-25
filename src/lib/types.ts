@@ -6,6 +6,8 @@ export interface TranscriptSegment {
   text: string;
   timestamp_ms: number;
   speaker_id?: string | null;
+  /** "mic" = local user, "system" = remote participants */
+  source?: string;
 }
 
 export interface Meeting {
@@ -103,6 +105,7 @@ export interface TranscriptionEvent {
   start_ms: number;
   end_ms: number;
   is_partial: boolean;
+  source: string;
 }
 
 export interface Summary {

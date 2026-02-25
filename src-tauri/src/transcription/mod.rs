@@ -11,6 +11,8 @@ pub struct TranscriptionEvent {
     pub start_ms: i64,
     pub end_ms: i64,
     pub is_partial: bool,
+    /// Audio source: "mic" (local user) or "system" (remote participants)
+    pub source: String,
 }
 
 /// Configuration for the transcription pipeline

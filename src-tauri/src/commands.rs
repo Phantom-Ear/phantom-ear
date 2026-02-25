@@ -9,7 +9,7 @@ use crate::asr::parakeet_backend::ParakeetModel;
 #[cfg(feature = "parakeet")]
 use crate::asr::AsrBackendType;
 use crate::asr::{self, TranscriptionEngine, WhisperModel};
-use crate::audio::AudioCapture;
+use crate::audio::{AudioCapture, SystemAudioCapture};
 use crate::detection::MeetingDetector;
 use crate::embeddings::{self, EmbeddingModel};
 use crate::llm::{LlmClient, LlmProvider};
@@ -35,6 +35,8 @@ pub struct TranscriptSegment {
     pub time: String,
     pub text: String,
     pub timestamp_ms: u64,
+    /// "mic" = local user, "system" = remote participants via SCK
+    pub source: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -165,6 +167,24 @@ pub struct AppState {
 
 /// A captured and resampled audio chunk ready for transcription.
 /// Passed from the audio producer to the transcription consumer via mpsc channel.
+/// Which physical source the audio came from.
+#[derive(Debug, Clone, PartialEq)]
+enum AudioSource {
+    /// Microphone — the local user's voice.
+    Mic,
+    /// System audio via ScreenCaptureKit — remote participants / any app audio.
+    System,
+}
+
+impl AudioSource {
+    fn as_str(&self) -> &'static str {
+        match self {
+            AudioSource::Mic => "mic",
+            AudioSource::System => "system",
+        }
+    }
+}
+
 #[derive(Debug)]
 struct AudioChunk {
     /// 16kHz mono f32 PCM samples, already resampled.
@@ -175,6 +195,8 @@ struct AudioChunk {
     duration_ms: i64,
     /// Monotonic index of this chunk (producer-assigned, used for segment IDs).
     chunk_index: u64,
+    /// Which capture source produced this chunk.
+    source: AudioSource,
 }
 
 // ============================================================================
@@ -263,15 +285,36 @@ pub async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Resu
     let app_producer = app.clone();
     let pending_prod = state.pending_chunks.clone();
 
+    // Clone tx so the system audio producer can share the same consumer channel.
+    let system_chunk_tx = chunk_tx.clone();
+
     tauri::async_runtime::spawn(run_audio_producer(
         app_producer,
         audio_capture_arc,
-        is_recording_arc,
-        is_paused_arc,
+        is_recording_arc.clone(),
+        is_paused_arc.clone(),
         TranscriptionConfig::default(),
         chunk_tx,
-        pending_prod,
+        pending_prod.clone(),
     ));
+
+    // System audio producer (macOS only): captures all app output via ScreenCaptureKit.
+    // Shares the same consumer channel; chunks are tagged AudioSource::System.
+    #[cfg(target_os = "macos")]
+    {
+        let app_sys = app.clone();
+        let is_recording_sys = is_recording_arc.clone();
+        let is_paused_sys = is_paused_arc.clone();
+        let pending_sys = pending_prod.clone();
+        tauri::async_runtime::spawn(run_system_audio_producer(
+            app_sys,
+            is_recording_sys,
+            is_paused_sys,
+            TranscriptionConfig::default(),
+            system_chunk_tx,
+            pending_sys,
+        ));
+    }
 
     // Transcription consumer: processes chunks from queue without blocking audio capture
     let engine_arc = state.transcription_engine.clone();
@@ -394,6 +437,7 @@ async fn run_audio_producer(
                     start_ms: total_duration_ms,
                     duration_ms,
                     chunk_index,
+                    source: AudioSource::Mic,
                 };
 
                 total_duration_ms += duration_ms;
@@ -425,6 +469,104 @@ async fn run_audio_producer(
 
     log::info!("Audio producer stopped after {} chunks", chunk_index);
     // Dropping chunk_tx here closes the channel, signalling the consumer to drain and stop
+}
+
+/// System audio producer (macOS only): captures all application output via ScreenCaptureKit.
+/// Shares the same mpsc channel as the mic producer; chunks are tagged AudioSource::System.
+#[cfg(target_os = "macos")]
+async fn run_system_audio_producer(
+    app: AppHandle,
+    is_recording: Arc<Mutex<bool>>,
+    is_paused: Arc<Mutex<bool>>,
+    config: TranscriptionConfig,
+    chunk_tx: tokio::sync::mpsc::Sender<AudioChunk>,
+    pending_chunks: Arc<AtomicUsize>,
+) {
+    let mut capture = SystemAudioCapture::new();
+
+    if let Err(e) = capture.start() {
+        log::warn!("System audio capture unavailable: {e}. Remote audio will not be transcribed.");
+        return;
+    }
+
+    let chunk_samples = (config.chunk_duration_secs * 16000.0) as usize;
+    let mut accumulated_samples: Vec<f32> = Vec::with_capacity(chunk_samples * 2);
+    let mut chunk_index: u64 = 0;
+    let mut total_duration_ms: i64 = 0;
+
+    log::info!("System audio producer started");
+
+    loop {
+        {
+            let recording = is_recording.lock().await;
+            if !*recording {
+                break;
+            }
+        }
+
+        {
+            let paused = is_paused.lock().await;
+            if *paused {
+                let _ = capture.get_samples(); // drain to avoid stale audio on resume
+                accumulated_samples.clear();
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                continue;
+            }
+        }
+
+        let samples = capture.get_samples();
+        if !samples.is_empty() {
+            accumulated_samples.extend(samples);
+        }
+
+        if accumulated_samples.len() >= chunk_samples {
+            let rms: f32 = {
+                let sum: f32 = accumulated_samples[..chunk_samples]
+                    .iter()
+                    .map(|s| s * s)
+                    .sum();
+                (sum / chunk_samples as f32).sqrt()
+            };
+
+            if rms >= config.silence_threshold {
+                let chunk_data: Vec<f32> = accumulated_samples.drain(..chunk_samples).collect();
+                let duration_ms = (chunk_data.len() as f32 / 16.0) as i64;
+                chunk_index += 1;
+
+                let chunk = AudioChunk {
+                    samples: chunk_data,
+                    start_ms: total_duration_ms,
+                    duration_ms,
+                    chunk_index,
+                    source: AudioSource::System,
+                };
+
+                total_duration_ms += duration_ms;
+
+                let count = pending_chunks.fetch_add(1, Ordering::SeqCst) + 1;
+                let _ = app.emit(
+                    "transcription-status",
+                    serde_json::json!({ "status": "queued", "pending_chunks": count }),
+                );
+
+                if chunk_tx.send(chunk).await.is_err() {
+                    log::info!("Chunk channel closed, stopping system audio producer");
+                    break;
+                }
+            } else {
+                let keep = (config.overlap_secs * 16000.0) as usize;
+                if accumulated_samples.len() > keep {
+                    accumulated_samples.drain(..(accumulated_samples.len() - keep));
+                }
+                total_duration_ms += (chunk_samples as f32 / 16.0) as i64;
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    capture.stop();
+    log::info!("System audio producer stopped after {} chunks", chunk_index);
 }
 
 /// Transcription consumer: receives audio chunks from the channel and runs Whisper inference.
@@ -492,12 +634,15 @@ async fn run_transcription_consumer(
                     let seg_id = format!("{}-seg-{}", meeting_id, segment_counter);
                     let time_label = format_time(chunk.start_ms as u64);
 
+                    let source_str = chunk.source.as_str().to_string();
+
                     let event = TranscriptionEvent {
                         id: seg_id.clone(),
                         text: text.clone(),
                         start_ms: chunk.start_ms,
                         end_ms: chunk.start_ms + chunk.duration_ms,
                         is_partial: false,
+                        source: source_str.clone(),
                     };
 
                     // Store in in-memory transcript
@@ -508,6 +653,7 @@ async fn run_transcription_consumer(
                             time: time_label.clone(),
                             text: event.text.clone(),
                             timestamp_ms: chunk.start_ms as u64,
+                            source: source_str.clone(),
                         });
                     }
 
@@ -522,6 +668,7 @@ async fn run_transcription_consumer(
                         text: text.clone(),
                         timestamp_ms: chunk.start_ms,
                         speaker_id: None,
+                        source: Some(source_str.clone()),
                         enhanced_text: None,
                         is_question: false,
                         question_answer: None,
@@ -944,6 +1091,7 @@ pub async fn get_meeting(
             time: s.time_label,
             text: s.text,
             timestamp_ms: s.timestamp_ms as u64,
+            source: s.source.unwrap_or_else(|| "mic".to_string()),
         })
         .collect();
 
