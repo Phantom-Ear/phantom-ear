@@ -29,7 +29,11 @@ impl SCStreamOutputTrait for SystemAudioHandler {
                     continue;
                 }
                 // SCK delivers native f32 non-interleaved PCM.
-                // Reinterpret the byte slice as &[f32].
+                // CoreAudio guarantees 4-byte alignment for mData, but verify defensively.
+                if bytes.as_ptr().align_offset(std::mem::align_of::<f32>()) != 0 {
+                    log::warn!("SCK audio buffer not f32-aligned, skipping");
+                    continue;
+                }
                 let floats = unsafe {
                     std::slice::from_raw_parts(
                         bytes.as_ptr() as *const f32,
