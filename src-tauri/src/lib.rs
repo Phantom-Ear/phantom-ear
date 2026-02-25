@@ -15,7 +15,7 @@ pub mod websearch;
 
 use commands::{AppState, Settings};
 use detection::MeetingDetector;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::Arc;
 use storage::Database;
 use tauri::{
@@ -154,6 +154,7 @@ pub fn run() {
                 embedding_model: Arc::new(Mutex::new(None)),
                 meeting_detector: Arc::new(Mutex::new(MeetingDetector::new())),
                 detection_running: Arc::new(AtomicBool::new(false)),
+                pending_chunks: Arc::new(AtomicUsize::new(0)),
             };
 
             // Auto-start meeting detection if enabled in settings
