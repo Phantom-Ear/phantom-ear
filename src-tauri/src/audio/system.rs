@@ -62,6 +62,12 @@ pub struct SystemAudioCapture {
 // SCStream holds ObjC objects; we always access it from a single async task.
 unsafe impl Send for SystemAudioCapture {}
 
+impl Default for SystemAudioCapture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemAudioCapture {
     pub fn new() -> Self {
         Self {
@@ -115,7 +121,7 @@ impl SystemAudioCapture {
             self.stream = Some(stream);
             self.is_running.store(true, Ordering::SeqCst);
             log::info!("System audio capture started (ScreenCaptureKit, 16 kHz mono)");
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(target_os = "macos"))]

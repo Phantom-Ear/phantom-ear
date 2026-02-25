@@ -9,7 +9,9 @@ use crate::asr::parakeet_backend::ParakeetModel;
 #[cfg(feature = "parakeet")]
 use crate::asr::AsrBackendType;
 use crate::asr::{self, TranscriptionEngine, WhisperModel};
-use crate::audio::{AudioCapture, SystemAudioCapture};
+use crate::audio::AudioCapture;
+#[cfg(target_os = "macos")]
+use crate::audio::SystemAudioCapture;
 use crate::detection::MeetingDetector;
 use crate::embeddings::{self, EmbeddingModel};
 use crate::llm::{LlmClient, LlmProvider};
@@ -173,6 +175,7 @@ enum AudioSource {
     /// Microphone — the local user's voice.
     Mic,
     /// System audio via ScreenCaptureKit — remote participants / any app audio.
+    #[cfg(target_os = "macos")]
     System,
 }
 
@@ -180,6 +183,7 @@ impl AudioSource {
     fn as_str(&self) -> &'static str {
         match self {
             AudioSource::Mic => "mic",
+            #[cfg(target_os = "macos")]
             AudioSource::System => "system",
         }
     }
@@ -286,6 +290,7 @@ pub async fn start_recording(app: AppHandle, state: State<'_, AppState>) -> Resu
     let pending_prod = state.pending_chunks.clone();
 
     // Clone tx so the system audio producer can share the same consumer channel.
+    #[cfg(target_os = "macos")]
     let system_chunk_tx = chunk_tx.clone();
 
     tauri::async_runtime::spawn(run_audio_producer(
