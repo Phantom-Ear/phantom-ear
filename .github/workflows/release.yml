@@ -98,8 +98,8 @@ jobs:
             Then open the app normally. This only needs to be done once.
 
             ### Windows Installation Note
-            - Use the `.exe` installer (recommended) — it automatically installs the Visual C++ Runtime if missing.
             - If the `.msi` installer is blocked by corporate policies, use the `.exe` installer instead.
+            - If you see an error about missing `MSVCP140.dll`, install [Visual C++ Runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe)
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
