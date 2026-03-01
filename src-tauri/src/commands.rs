@@ -1625,7 +1625,7 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
         intent: "SPECIFIC_QUERY".to_string(),
         time_minutes: None,
     };
-    
+
     let intent = match intent_result {
         Ok(i) => i,
         Err(e) => {
@@ -1633,8 +1633,12 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
             fallback_intent
         }
     };
-    
-    log::info!("Phomy interpreted intent: {} (mins: {:?})", intent.intent, intent.time_minutes);
+
+    log::info!(
+        "Phomy interpreted intent: {} (mins: {:?})",
+        intent.intent,
+        intent.time_minutes
+    );
 
     // ---- Intent Routing ----
     match intent.intent.as_str() {
@@ -1740,8 +1744,7 @@ async fn handle_time_window_intent(
                 .map_err(|e| format!("DB error: {}", e))?;
             if let Some(latest) = segs.last() {
                 let cutoff = latest.timestamp_ms - (mins * 60 * 1000);
-                let filtered: Vec<_> =
-                    segs.iter().filter(|s| s.timestamp_ms >= cutoff).collect();
+                let filtered: Vec<_> = segs.iter().filter(|s| s.timestamp_ms >= cutoff).collect();
                 filtered
                     .iter()
                     .map(|s| format!("[{}] {}", s.time_label, s.text))
