@@ -1636,229 +1636,263 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
     
     log::info!("Phomy interpreted intent: {} (mins: {:?})", intent.intent, intent.time_minutes);
 
-    // ---- Route 1: "What did they just say?" / recency queries ----
-    if intent.intent == "RECENCY" {
-        // Use live transcript (last ~10 chunks) or active meeting
-        let context = {
-            let is_recording = *state.is_recording.lock().await;
-            let active_mid = state.active_meeting_id.lock().await.clone();
+    // ---- Intent Routing ----
+    match intent.intent.as_str() {
+        "RECENCY" => handle_recency_intent(&question, &state, &client).await,
+        "TIME_WINDOW" => {
+            let mins = intent.time_minutes.unwrap_or(5);
+            handle_time_window_intent(&question, mins, &state, &client).await
+        }
+        "RECALL_LAST" => handle_recall_last_intent(&question, &state, &client).await,
+        "GLOBAL_SUMMARY" => handle_global_summary_intent(&question, &state, &client).await,
+        "ACTION_ITEMS" => handle_action_items_intent(&question, &state, &client).await,
+        _ => handle_specific_query_intent(&question, &state, &client).await,
+    }
+}
 
-            if is_recording {
-                let transcript = state.transcript.lock().await;
-                let recent: Vec<_> = transcript
+// ============================================================================
+// Phomy Intent Handlers
+// ============================================================================
+
+async fn handle_recency_intent(
+    question: &str,
+    state: &State<'_, AppState>,
+    client: &LlmClient,
+) -> Result<String, String> {
+    let context = {
+        let is_recording = *state.is_recording.lock().await;
+        let active_mid = state.active_meeting_id.lock().await.clone();
+
+        if is_recording {
+            let transcript = state.transcript.lock().await;
+            let recent: Vec<_> = transcript
+                .iter()
+                .rev()
+                .take(10)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            recent
+                .iter()
+                .map(|s| format!("[{}] {}", s.time, s.text))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else if let Some(mid) = active_mid {
+            let segs = state
+                .db
+                .get_last_segments(&mid, 10)
+                .map_err(|e| format!("DB error: {}", e))?;
+            segs.iter()
+                .map(|s| {
+                    let text = s.enhanced_text.as_ref().unwrap_or(&s.text);
+                    format!("[{}] {}", s.time_label, text)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            return Err("No active meeting to reference.".to_string());
+        }
+    };
+
+    if context.is_empty() {
+        return Err("No recent transcript available.".to_string());
+    }
+
+    let system = "You are Phomy, a calm meeting assistant. Summarize what was just said based on the most recent transcript chunks. Be brief and direct.";
+    let user = format!("Recent transcript:\n{}\n\nQuestion: {}", context, question);
+    client
+        .complete(system, &user)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))
+}
+
+async fn handle_time_window_intent(
+    question: &str,
+    mins: i64,
+    state: &State<'_, AppState>,
+    client: &LlmClient,
+) -> Result<String, String> {
+    let context = {
+        let is_recording = *state.is_recording.lock().await;
+        let active_mid = state.active_meeting_id.lock().await.clone();
+
+        if is_recording {
+            let transcript = state.transcript.lock().await;
+            if let Some(latest) = transcript.last() {
+                let cutoff = (latest.timestamp_ms as i64) - (mins * 60 * 1000);
+                let filtered: Vec<_> = transcript
                     .iter()
-                    .rev()
-                    .take(10)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
+                    .filter(|s| s.timestamp_ms as i64 >= cutoff)
                     .collect();
-                recent
+                filtered
                     .iter()
                     .map(|s| format!("[{}] {}", s.time, s.text))
                     .collect::<Vec<_>>()
                     .join("\n")
-            } else if let Some(mid) = active_mid {
-                let segs = state
-                    .db
-                    .get_last_segments(&mid, 10)
-                    .map_err(|e| format!("DB error: {}", e))?;
-                // Use enhanced text when available
-                segs.iter()
-                    .map(|s| {
-                        let text = s.enhanced_text.as_ref().unwrap_or(&s.text);
-                        format!("[{}] {}", s.time_label, text)
-                    })
+            } else {
+                String::new()
+            }
+        } else if let Some(mid) = active_mid {
+            let segs = state
+                .db
+                .get_segments(&mid)
+                .map_err(|e| format!("DB error: {}", e))?;
+            if let Some(latest) = segs.last() {
+                let cutoff = latest.timestamp_ms - (mins * 60 * 1000);
+                let filtered: Vec<_> =
+                    segs.iter().filter(|s| s.timestamp_ms >= cutoff).collect();
+                filtered
+                    .iter()
+                    .map(|s| format!("[{}] {}", s.time_label, s.text))
                     .collect::<Vec<_>>()
                     .join("\n")
             } else {
-                return Err("No active meeting to reference.".to_string());
+                String::new()
             }
-        };
-
-        if context.is_empty() {
-            return Err("No recent transcript available.".to_string());
-        }
-
-        let system = "You are Phomy, a calm meeting assistant. Summarize what was just said based on the most recent transcript chunks. Be brief and direct.";
-        let user = format!("Recent transcript:\n{}\n\nQuestion: {}", context, question);
-        return client
-            .complete(system, &user)
-            .await
-            .map_err(|e| format!("LLM error: {}", e));
-    }
-
-    // ---- Route 2: Time-based queries ("last 5 minutes", "past 10 minutes") ----
-    if intent.intent == "TIME_WINDOW" {
-        let mins = intent.time_minutes.unwrap_or(5); // Default to 5 if LLM fails to extract
-        let context = {
-            let is_recording = *state.is_recording.lock().await;
-            let active_mid = state.active_meeting_id.lock().await.clone();
-
-            if is_recording {
-                let transcript = state.transcript.lock().await;
-                if let Some(latest) = transcript.last() {
-                    let cutoff = (latest.timestamp_ms as i64) - (mins * 60 * 1000);
-                    let filtered: Vec<_> = transcript
-                        .iter()
-                        .filter(|s| s.timestamp_ms as i64 >= cutoff)
-                        .collect();
-                    filtered
-                        .iter()
-                        .map(|s| format!("[{}] {}", s.time, s.text))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    String::new()
-                }
-            } else if let Some(mid) = active_mid {
-                let segs = state
-                    .db
-                    .get_segments(&mid)
-                    .map_err(|e| format!("DB error: {}", e))?;
-                if let Some(latest) = segs.last() {
-                    let cutoff = latest.timestamp_ms - (mins * 60 * 1000);
-                    let filtered: Vec<_> =
-                        segs.iter().filter(|s| s.timestamp_ms >= cutoff).collect();
-                    filtered
-                        .iter()
-                        .map(|s| format!("[{}] {}", s.time_label, s.text))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                } else {
-                    String::new()
-                }
-            } else {
-                return Err("No active meeting to reference.".to_string());
-            }
-        };
-
-        if context.is_empty() {
-            return Err("No transcript in that time range.".to_string());
-        }
-
-        let system = "You are Phomy, a calm meeting assistant. Summarize the transcript from the requested time window. Be concise.";
-        let user = format!(
-            "Transcript from the last {} minutes:\n{}\n\nQuestion: {}",
-            mins, context, question
-        );
-        return client
-            .complete(system, &user)
-            .await
-            .map_err(|e| format!("LLM error: {}", e));
-    }
-
-    // ---- Route 3: Meeting recall ("last meeting", "previous meeting") ----
-    if intent.intent == "RECALL_LAST" {
-        let meetings = state
-            .db
-            .get_recent_meetings_with_summaries(1)
-            .map_err(|e| format!("DB error: {}", e))?;
-
-        if meetings.is_empty() {
-            return Err("No completed meetings found.".to_string());
-        }
-
-        let (mid, title, created_at, summary) = &meetings[0];
-        let context = if let Some(s) = summary {
-            format!("Meeting: {} ({})\nSummary:\n{}", title, created_at, s)
         } else {
-            // Fall back to transcript chunks
-            let segs = state
-                .db
-                .get_segments(mid)
-                .map_err(|e| format!("DB error: {}", e))?;
-            let transcript: String = segs
-                .iter()
-                .map(|s| format!("[{}] {}", s.time_label, s.text))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!(
-                "Meeting: {} ({})\nTranscript:\n{}",
-                title, created_at, transcript
-            )
-        };
+            return Err("No active meeting to reference.".to_string());
+        }
+    };
 
-        let system = "You are Phomy, a calm meeting assistant. Answer the question using the meeting context provided. Be helpful and concise.";
-        let user = format!("{}\n\nQuestion: {}", context, question);
-        return client
-            .complete(system, &user)
-            .await
-            .map_err(|e| format!("LLM error: {}", e));
+    if context.is_empty() {
+        return Err("No transcript in that time range.".to_string());
     }
 
-    // ---- Route 4: Global/weekly summaries ("this week", "all meetings", "overall") ----
-    if intent.intent == "GLOBAL_SUMMARY" {
-        let meetings = state
+    let system = "You are Phomy, a calm meeting assistant. Summarize the transcript from the requested time window. Be concise.";
+    let user = format!(
+        "Transcript from the last {} minutes:\n{}\n\nQuestion: {}",
+        mins, context, question
+    );
+    client
+        .complete(system, &user)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))
+}
+
+async fn handle_recall_last_intent(
+    question: &str,
+    state: &State<'_, AppState>,
+    client: &LlmClient,
+) -> Result<String, String> {
+    let meetings = state
+        .db
+        .get_recent_meetings_with_summaries(1)
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    if meetings.is_empty() {
+        return Err("No completed meetings found.".to_string());
+    }
+
+    let (mid, title, created_at, summary) = &meetings[0];
+    let context = if let Some(s) = summary {
+        format!("Meeting: {} ({})\nSummary:\n{}", title, created_at, s)
+    } else {
+        let segs = state
             .db
-            .get_recent_meetings_with_summaries(10)
+            .get_segments(mid)
             .map_err(|e| format!("DB error: {}", e))?;
-
-        if meetings.is_empty() {
-            return Err("No completed meetings found.".to_string());
-        }
-
-        let context: String = meetings
+        let transcript: String = segs
             .iter()
-            .map(|(_, title, created_at, summary)| {
-                if let Some(s) = summary {
-                    format!("--- {} ({}) ---\n{}\n", title, created_at, s)
-                } else {
-                    format!(
-                        "--- {} ({}) ---\n(no summary available)\n",
-                        title, created_at
-                    )
-                }
-            })
+            .map(|s| format!("[{}] {}", s.time_label, s.text))
             .collect::<Vec<_>>()
             .join("\n");
+        format!(
+            "Meeting: {} ({})\nTranscript:\n{}",
+            title, created_at, transcript
+        )
+    };
 
-        let system = "You are Phomy, a calm meeting assistant. Provide a high-level overview across the meetings described. Be concise and organized.";
-        let user = format!("Meeting summaries:\n{}\n\nQuestion: {}", context, question);
-        return client
-            .complete(system, &user)
-            .await
-            .map_err(|e| format!("LLM error: {}", e));
+    let system = "You are Phomy, a calm meeting assistant. Answer the question using the meeting context provided. Be helpful and concise.";
+    let user = format!("{}\n\nQuestion: {}", context, question);
+    client
+        .complete(system, &user)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))
+}
+
+async fn handle_global_summary_intent(
+    question: &str,
+    state: &State<'_, AppState>,
+    client: &LlmClient,
+) -> Result<String, String> {
+    let meetings = state
+        .db
+        .get_recent_meetings_with_summaries(10)
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    if meetings.is_empty() {
+        return Err("No completed meetings found.".to_string());
     }
 
-    // ---- Route 5 (NEW): Action Items ----
-    if intent.intent == "ACTION_ITEMS" {
-        let meetings = state
-            .db
-            .get_recent_meetings_with_summaries(10)
-            .map_err(|e| format!("DB error: {}", e))?;
+    let context: String = meetings
+        .iter()
+        .map(|(_, title, created_at, summary)| {
+            if let Some(s) = summary {
+                format!("--- {} ({}) ---\n{}\n", title, created_at, s)
+            } else {
+                format!(
+                    "--- {} ({}) ---\n(no summary available)\n",
+                    title, created_at
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
-        if meetings.is_empty() {
-            return Err("No completed meetings found to check for action items.".to_string());
-        }
+    let system = "You are Phomy, a calm meeting assistant. Provide a high-level overview across the meetings described. Be concise and organized.";
+    let user = format!("Meeting summaries:\n{}\n\nQuestion: {}", context, question);
+    client
+        .complete(system, &user)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))
+}
 
-        let context: String = meetings
-            .iter()
-            .map(|(_, title, created_at, summary)| {
-                if let Some(s) = summary {
-                    format!("--- {} ({}) ---\n{}\n", title, created_at, s)
-                } else {
-                    String::new()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+async fn handle_action_items_intent(
+    question: &str,
+    state: &State<'_, AppState>,
+    client: &LlmClient,
+) -> Result<String, String> {
+    let meetings = state
+        .db
+        .get_recent_meetings_with_summaries(10)
+        .map_err(|e| format!("DB error: {}", e))?;
 
-        let system = "You are Phomy, a helpful meeting assistant. The user is asking about their action items, tasks, or to-dos. Extract and list all relevant action items from the provided meeting summaries. Be organized and concise.";
-        let user = format!("Meeting summaries:\n{}\n\nQuestion: {}", context, question);
-        return client
-            .complete(system, &user)
-            .await
-            .map_err(|e| format!("LLM error: {}", e));
+    if meetings.is_empty() {
+        return Err("No completed meetings found to check for action items.".to_string());
     }
 
-    // ---- Default: semantic search across all meetings (SPECIFIC_QUERY) ----
+    let context: String = meetings
+        .iter()
+        .map(|(_, title, created_at, summary)| {
+            if let Some(s) = summary {
+                format!("--- {} ({}) ---\n{}\n", title, created_at, s)
+            } else {
+                String::new()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let system = "You are Phomy, a helpful meeting assistant. The user is asking about their action items, tasks, or to-dos. Extract and list all relevant action items from the provided meeting summaries. Be organized and concise.";
+    let user = format!("Meeting summaries:\n{}\n\nQuestion: {}", context, question);
+    client
+        .complete(system, &user)
+        .await
+        .map_err(|e| format!("LLM error: {}", e))
+}
+
+async fn handle_specific_query_intent(
+    question: &str,
+    state: &State<'_, AppState>,
+    client: &LlmClient,
+) -> Result<String, String> {
     let limit = 10;
     let semantic_context: Option<String> = {
         let query_emb = {
             let model_guard = state.embedding_model.lock().await;
             match model_guard.as_ref() {
-                Some(model) => model.embed(&question).ok(),
+                Some(model) => model.embed(question).ok(),
                 None => None,
             }
         };
@@ -3286,6 +3320,7 @@ pub async fn phomy_ask_with_search(
     question: String,
     use_web_search: bool,
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     // First try to answer from meeting data
     let answer = phomy_ask(question.clone(), state.clone()).await;
@@ -3295,9 +3330,23 @@ pub async fn phomy_ask_with_search(
         && (answer.is_err()
             || answer
                 .as_ref()
-                .map(|a| a.contains("No meeting"))
+                .map(|a| {
+                    let lower = a.to_lowercase();
+                    lower.contains("no meeting")
+                        || lower.contains("not in the context")
+                        || lower.contains("does not include information")
+                        || lower.contains("does not contain any information")
+                        || lower.contains("not mentioned")
+                        || lower.contains("no information")
+                        || lower.contains("cannot answer")
+                        || lower.contains("not provide information")
+                        || lower.contains("no_context_found")
+                })
                 .unwrap_or(false))
     {
+        // Tell the frontend a web search has started so it can show a loading indicator
+        let _ = app.emit("phomy-web-search-started", ());
+
         // Perform web search
         let search_results = web_search(question.clone()).await?;
 

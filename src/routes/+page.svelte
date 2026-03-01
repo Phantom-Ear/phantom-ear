@@ -890,6 +890,16 @@
     askQuestion();
   }
 
+  let phomyWebSearchLoading = $state(false);
+  let phomyWebSearchCancelled = $state(false);
+
+  function cancelWebSearch() {
+    phomyWebSearchCancelled = true;
+    phomyWebSearchLoading = false;
+    phomyIsAsking = false;
+    phomyHistory = [...phomyHistory.slice(0, -1), { role: 'assistant', text: "Web search cancelled by user." }];
+  }
+
   async function askPhomy() {
     if (!phomyQuestion.trim() || phomyIsAsking) return;
     const q = phomyQuestion.trim();
@@ -898,8 +908,17 @@
     phomyAnswer = "";
     phomyReferences = [];
     phomyContextLimit = 10;
+    phomyWebSearchLoading = false;
+    phomyWebSearchCancelled = false;
 
     phomyHistory = [...phomyHistory, { role: 'user', text: q }];
+
+    // Listen for Web Search Triggered Event
+    const unlistenSearchStarted = await listen("phomy-web-search-started", () => {
+      if (!phomyWebSearchCancelled) {
+        phomyWebSearchLoading = true;
+      }
+    });
 
     try {
       // Semantic search for references (display only)
@@ -907,7 +926,17 @@
       phomyReferences = refs;
 
       // Use Phomy to answer questions (web search fallback is built-in)
-      const ans = await invoke<string>("phomy_ask", { question: q });
+      const ansPromise = invoke<string>("phomy_ask_with_search", { question: q, useWebSearch: true });
+      
+      const ans = await ansPromise;
+      
+      // If user clicked cancel during the prolonged web-search, discard the result
+      if (phomyWebSearchCancelled) {
+         unlistenSearchStarted();
+         return;
+      }
+
+      phomyWebSearchLoading = false;
       phomyAnswer = ans;
       phomyHistory = [...phomyHistory, { role: 'assistant', text: ans, refs }];
       
@@ -918,6 +947,11 @@
         }
       }, 50);
     } catch (e) {
+      if (phomyWebSearchCancelled) {
+         unlistenSearchStarted();
+         return;
+      }
+      phomyWebSearchLoading = false;
       const errMsg = `Error: ${e}`;
       phomyAnswer = errMsg;
       phomyHistory = [...phomyHistory, { role: 'assistant', text: errMsg }];
@@ -928,8 +962,12 @@
           phomyChatContainer.scrollTop = phomyChatContainer.scrollHeight;
         }
       }, 50);
+    } finally {
+      unlistenSearchStarted();
+      if (!phomyWebSearchCancelled) {
+        phomyIsAsking = false;
+      }
     }
-    phomyIsAsking = false;
   }
 
   function toggleRefs(index: number) {
@@ -954,7 +992,7 @@
       const refs = await meetingsStore.semanticSearch(lastUserMsg.text, undefined, newLimit);
       phomyReferences = refs;
 
-      const ans = await invoke<string>("phomy_ask", { question: lastUserMsg.text });
+      const ans = await invoke<string>("phomy_ask_with_search", { question: lastUserMsg.text, useWebSearch: true });
       phomyAnswer = ans;
       phomyHistory = [
         ...phomyHistory.slice(0, -1),
@@ -2006,7 +2044,28 @@
             {/if}
 
             <!-- Phomy Input Bar -->
-            <div class="mt-4">
+            <div class="mt-4 flex flex-col gap-2">
+              {#if phomyWebSearchLoading}
+                <div class="flex items-center justify-between px-4 py-3 border border-phantom-ear-purple/30 rounded-xl bg-phantom-ear-purple/5 max-w-lg mx-auto w-full">
+                  <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-phantom-ear-purple animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    <div class="flex flex-col">
+                      <span class="text-sm font-medium text-phantom-ear-text">Searching the web...</span>
+                      <span class="text-xs text-phantom-ear-text-muted">No context found in meeting.</span>
+                    </div>
+                  </div>
+                  <button 
+                    onclick={cancelWebSearch}
+                    class="px-3 py-1.5 text-xs font-medium text-phantom-ear-text bg-phantom-ear-surface hover:bg-phantom-ear-surface-hover border border-phantom-ear-border rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              {/if}
+
               <form
                 onsubmit={(e) => {
                   e.preventDefault();
@@ -2018,13 +2077,13 @@
                   type="text"
                   bind:value={phomyQuestion}
                   placeholder={embeddingModelLoaded ? "Ask Phomy about your meetings..." : "Loading embedding model..."}
-                  disabled={!embeddingModelLoaded}
+                  disabled={!embeddingModelLoaded || phomyWebSearchLoading}
                   class="w-full pl-4 pr-14 py-3.5 glass border border-phantom-ear-border rounded-2xl text-sm text-phantom-ear-text placeholder:text-phantom-ear-text-muted focus:outline-none focus:border-phantom-ear-purple/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 />
                 <div class="absolute right-2">
                   <button
                     type="submit"
-                    disabled={!phomyQuestion.trim() || phomyIsAsking || !embeddingModelLoaded}
+                    disabled={!phomyQuestion.trim() || phomyIsAsking || !embeddingModelLoaded || phomyWebSearchLoading}
                     class="p-2 rounded-xl bg-phantom-ear-purple text-white hover:opacity-80 transition-all disabled:opacity-20 disabled:cursor-not-allowed"
                     title="Ask Phomy"
                   >
