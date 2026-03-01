@@ -1,15 +1,20 @@
 <div align="center">
 
-# 👻 PhantomEar
+# 👻 PhantomEar (Now Fomy.io)
 
 ### **Always Listening. Never Seen.**
 
-*The privacy-first AI meeting assistant that lives on your machine*
+*The privacy-first AI meeting assistant that lives entirely on your machine.*
 
 <br/>
 
-[![Release](https://img.shields.io/github/v/release/Phantom-Ear/phantom-ear?style=for-the-badge&logo=github&color=6c5ce7)](https://github.com/Phantom-Ear/phantom-ear/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Phantom-Ear/phantom-ear/total?style=for-the-badge&logo=download&color=00b894)](https://github.com/Phantom-Ear/phantom-ear/releases)
+**✨ Visit our new home: [fomy.io](https://fomy.io) ✨**
+
+<br/>
+
+[![Website](https://img.shields.io/badge/Website-fomy.io-6c5ce7?style=for-the-badge&logo=vercel)](https://fomy.io)
+[![Release](https://img.shields.io/github/v/release/Phantom-Ear/phantom-ear?style=for-the-badge&logo=github&color=00b894)](https://github.com/Phantom-Ear/phantom-ear/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Phantom-Ear/phantom-ear/total?style=for-the-badge&logo=download&color=0984e3)](https://github.com/Phantom-Ear/phantom-ear/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/Phantom-Ear/phantom-ear/releases)
 
@@ -22,11 +27,12 @@
 
 <br/>
 
-[**Download**](#-download) • [**Features**](#-features) • [**How It Works**](#-how-it-works) • [**Tech Stack**](#-architecture) • [**Development**](#-development)
+[**Download**](#-download) • [**Features**](#-features) • [**Phomy AI**](#-meet-phomy) • [**How It Works**](#-how-it-works) • [**Tech Stack**](#-architecture)
 
 <br/>
-<img width="1117" height="970" alt="image" src="https://github.com/user-attachments/assets/18563c7c-07dc-47ea-ad28-5ab9c25af249" />
-<img width="1117" height="970" alt="image" src="https://github.com/user-attachments/assets/a3dc61ce-b0ef-4020-8727-c5b0fa9b655f" />
+
+<img width="1117" height="970" alt="PhantomEar Dashboard" src="https://github.com/user-attachments/assets/18563c7c-07dc-47ea-ad28-5ab9c25af249" />
+<img width="1117" height="970" alt="Phomy Chat Interface" src="https://github.com/user-attachments/assets/a3dc61ce-b0ef-4020-8727-c5b0fa9b655f" />
 
 </div>
 
@@ -34,44 +40,46 @@
 
 <br/>
 
-## 🎯 The Problem
+## 🎯 The Problem with Modern Meeting AI
 
 Traditional meeting assistants **expose your presence**:
-- 🤖 Bot joins the call → Everyone knows you're recording
-- ☁️ Audio uploaded to cloud → Your data leaves your control
-- 🔒 Admin install required → IT blocks the tool
-- 💰 Monthly subscriptions → Costs add up
+- 🤖 **Bots join the call:** Everyone knows you're recording.
+- ☁️ **Cloud uploads:** Your private conversations leave your secure environment.
+- 🔒 **Admin privileges:** IT blocks the installation of invasive tools.
+- 💰 **Expensive subscriptions:** Monthly costs rack up for simple transcription features.
 
 <br/>
 
-## ✨ The PhantomEar Difference
+## ✨ The PhantomEar Solution
+
+PhantomEar (fomy) is fundamentally different. It is an ambient intelligence tool built for privacy purists.
 
 <table>
 <tr>
 <td width="50%">
 
 ### 🔒 **100% Local Processing**
-Audio never leaves your machine. Transcription runs locally using Whisper. Your meetings, your data, your control.
+Audio never leaves your machine. Transcription runs locally using optimized Whisper models. Your meetings, your data, your control.
 
 </td>
 <td width="50%">
 
 ### 👻 **Zero Meeting Footprint**
-No bots joining calls. No recording banners. No participant notifications. Completely invisible.
+No jarring bots invading your Zoom calls. No "Recording in progress" banners. No participant prompts. Completely invisible.
 
 </td>
 </tr>
 <tr>
 <td width="50%">
 
-### 🧠 **AI-Powered Intelligence**
-Ask questions about any meeting. Get instant summaries. Search across all your conversations with semantic search.
+### 🧠 **Intelligent Recall**
+Ask questions about any meeting. Get instant algorithmic summaries. Search across all your conversations effortlessly with bleeding-edge semantic search.
 
 </td>
 <td width="50%">
 
-### 🏢 **Enterprise Ready**
-User-level installation. No admin rights. No IT tickets. Works on restricted corporate machines.
+### 🏢 **Enterprise Ready out of the Box**
+User-level installation. Runs smoothly without admin rights or IT tickets. Functions perfectly on restricted corporate laptops.
 
 </td>
 </tr>
@@ -85,29 +93,33 @@ User-level installation. No admin rights. No IT tickets. Works on restricted cor
 
 <div align="center">
 
+Ready to take back your meeting privacy?
+
 ### 🚀 **[Download Latest Release](https://github.com/Phantom-Ear/phantom-ear/releases/latest)**
+
+*(Or visit [fomy.io](https://fomy.io) for more information)*
 
 </div>
 
 <br/>
 
-| Platform | Architecture | Download |
+| Platform | Architecture | Binary |
 |----------|-------------|----------|
 | **macOS** | Apple Silicon (M1/M2/M3) | [`.dmg`](https://github.com/Phantom-Ear/phantom-ear/releases/latest) |
 | **Windows** | x64 | [`.exe`](https://github.com/Phantom-Ear/phantom-ear/releases/latest) / [`.msi`](https://github.com/Phantom-Ear/phantom-ear/releases/latest) |
 
 <details>
-<summary><b>📋 Installation Notes</b></summary>
+<summary><b>🛠 Troubleshooting Installation</b></summary>
 
 ### macOS
-Since PhantomEar is not yet notarized with Apple, you may see a "damaged" warning. Fix it with:
+Since PhantomEar is open-source and not yet notarized with Apple, you may see an "App is damaged" warning. Fix it instantly with:
 ```bash
 xattr -cr /Applications/PhantomEar.app
 ```
 
 ### Windows
-- If `.msi` is blocked by corporate policy, use the `.exe` installer
-- If you see `MSVCP140.dll` error, install [Visual C++ Runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+- If `.msi` is blocked by strict corporate policy, use the portable `.exe` installer.
+- If you see an `MSVCP140.dll` error on a fresh Windows system, install the [Visual C++ Runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 
 </details>
 
@@ -115,7 +127,7 @@ xattr -cr /Applications/PhantomEar.app
 
 ---
 
-## 🎬 Features
+## 🎬 Core Features
 
 <br/>
 
@@ -124,61 +136,65 @@ xattr -cr /Applications/PhantomEar.app
 <td align="center" width="33%">
 <img src="https://img.icons8.com/fluency/96/microphone.png" width="48"/>
 <br/><b>Real-Time Transcription</b>
-<br/><sub>Live speech-to-text powered by Whisper</sub>
+<br/><sub>Live, hyper-accurate speech-to-text powered by local Whisper.</sub>
 </td>
 <td align="center" width="33%">
 <img src="https://img.icons8.com/fluency/96/chat.png" width="48"/>
 <br/><b>AI Q&A</b>
-<br/><sub>Ask questions about any meeting</sub>
+<br/><sub>Interact naturally and ask hyper-specific questions about any past meeting.</sub>
 </td>
 <td align="center" width="33%">
 <img src="https://img.icons8.com/fluency/96/document.png" width="48"/>
 <br/><b>Auto Summaries</b>
-<br/><sub>Key points, decisions & action items</sub>
+<br/><sub>Distill hour-long meetings into key points, decisions & action items.</sub>
 </td>
 </tr>
 <tr>
 <td align="center" width="33%">
 <img src="https://img.icons8.com/fluency/96/search.png" width="48"/>
 <br/><b>Semantic Search</b>
-<br/><sub>Find anything across all meetings</sub>
+<br/><sub>Find abstract concepts or exact phrases across all your stored meetings.</sub>
 </td>
 <td align="center" width="33%">
 <img src="https://img.icons8.com/fluency/96/database.png" width="48"/>
 <br/><b>Persistent Memory</b>
-<br/><sub>SQLite with full-text search</sub>
+<br/><sub>Robust SQLite backed with full-text fuzzy search.</sub>
 </td>
 <td align="center" width="33%">
 <img src="https://img.icons8.com/fluency/96/privacy.png" width="48"/>
-<br/><b>100% Private</b>
-<br/><sub>Everything stays on your device</sub>
+<br/><b>Air-Gapped Privacy</b>
+<br/><sub>Everything stays on your device. Period.</sub>
 </td>
 </tr>
 </table>
 
-<br/>
+### 👻 Meet Phomy: Your Intelligent Meeting Co-Pilot
+
+Phomy is your dedicated AI meeting assistant. It uses advanced RAG (Retrieval-Augmented Generation) to understand your intent:
+- **Time Windows:** *"What did we discuss in the last 15 minutes?"*
+- **Action Items:** *"List all the tasks assigned to me during this sync."*
+- **Global Search:** *"When did we last talk about the Q3 marketing budget across all meetings?"*
+- **Web Fallback:** If you ask a question outside the scope of your transcripts (e.g. *"Who won the world cup in the year we discussed?"*), Phomy seamlessly falls back to a live, configurable Web Search that you can cancel at any time.
 
 ### Feature Highlights
 
-| Feature | Description |
-|---------|-------------|
-| 🎙️ **Multi-Model ASR** | Whisper (tiny → large) or Parakeet CTC models |
-| 🤖 **LLM Flexibility** | OpenAI API or Ollama (fully local) |
-| ⏸️ **Pause/Resume** | Pause transcription without stopping the session |
-| 📝 **Transcript Editing** | Edit segments, fix transcription errors |
-| 🗣️ **Speaker Labels** | Manually assign speakers to segments |
-| 📊 **Timeline View** | Visual timeline with quick navigation |
-| 🔍 **Quick Search** | `Cmd+K` to search across all meetings |
-| 🖥️ **System Tray** | Minimize to tray, start/stop from menu |
-| 📋 **Export** | Copy as Markdown or plain text |
+- 🎙️ **Multi-Model ASR:** Choose between varying Whisper variants (*tiny → large*) or Parakeet CTC models based on your hardware specs.
+- 🤖 **LLM Flexibility:** Plug in an OpenAI API key or use **Ollama** (for a fully air-gapped, 100% local operation).
+- ⏸️ **Pause/Resume:** Pause transcription on-the-fly without breaking the recording session.
+- 📝 **Transcript Editing:** Modify generated segments or fix rare transcription errors.
+- 🗣️ **Speaker Labels:** Manually tag speakers to dialogue segments for better context tracking.
+- 📊 **Visual Timeline:** Navigate long recordings effortlessly with an interactive timeline.
+- 🔍 **Quick Global Search:** Hit `Cmd+K` from anywhere to search across every recorded meeting.
+- 🖥️ **System Tray Integration:** Run headlessly in the background. Start/stop directly from the menu bar.
+- 📋 **Seamless Export:** One-click copy interactions as Markdown or plain text to share.
 
 <br/>
 
 ---
 
-## 🔬 How It Works
+## 🔬 How It Works Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           YOUR MACHINE                                   │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌──────────┐ │
@@ -195,8 +211,8 @@ xattr -cr /Applications/PhantomEar.app
 └───────────────────────────────────────────────│─────────────────────────┘
                                                 │
                           ┌─────────────────────┴─────────────────────┐
-                          │         OPTIONAL: LLM Context              │
-                          │    (Only curated text, never raw audio)    │
+                          │         OPTIONAL: LLM Context             │
+                          │    (Only curated text, never raw audio)   │
                           └─────────────────────┬─────────────────────┘
                                                 │
                                     ┌───────────┴───────────┐
@@ -209,50 +225,24 @@ xattr -cr /Applications/PhantomEar.app
 
 <br/>
 
-### Privacy by Design
+### Data Privacy Contract
 
 | Data Type | Location | Sent to Cloud? |
 |-----------|----------|----------------|
-| 🎤 Raw Audio | RAM only (never saved) | ❌ Never |
-| 📝 Transcripts | Local SQLite | ❌ Never |
-| 🧠 Embeddings | Local SQLite | ❌ Never |
-| 💬 LLM Context | Selected text only | ⚠️ Optional* |
+| 🎤 Raw Audio | Ephemeral RAM only (never stored) | ❌ **Never** |
+| 📝 Transcripts | Encrypted Local SQLite | ❌ **Never** |
+| 🧠 Embeddings | Encrypted Local SQLite | ❌ **Never** |
+| 💬 LLM Context | Snippet text | ⚠️ **Optional*** |
 
-*Only if using OpenAI. Use Ollama for 100% local operation.
+*\*Only if explicitly using the OpenAI API integration. Switch to Ollama for a 100% local, air-gapped data loop.*
 
 <br/>
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Development & Contribution
 
-<br/>
-
-```
-phantom-ear/
-├── src/                          # Svelte 5 Frontend
-│   ├── routes/+page.svelte       # Main application
-│   ├── lib/
-│   │   ├── components/           # UI components
-│   │   ├── stores/               # State management
-│   │   └── utils/                # Utilities
-│   └── app.css                   # TailwindCSS v4
-│
-├── src-tauri/                    # Rust Backend
-│   └── src/
-│       ├── lib.rs                # Tauri entry point
-│       ├── commands.rs           # IPC handlers
-│       ├── audio/                # Audio capture (cpal)
-│       ├── asr/                  # Whisper integration
-│       ├── transcription/        # Real-time pipeline
-│       ├── embeddings/           # BGE-small vectors
-│       ├── storage/              # SQLite + FTS5
-│       └── llm/                  # OpenAI/Ollama clients
-```
-
-<br/>
-
-### Tech Stack
+### Tech Stack Breakdown
 
 <table>
 <tr>
@@ -263,136 +253,54 @@ phantom-ear/
 </tr>
 </table>
 
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **Runtime** | Tauri 2.0 | Lightweight native wrapper |
-| **Backend** | Rust | Performance-critical processing |
-| **Frontend** | Svelte 5 | Reactive UI with runes |
-| **Styling** | TailwindCSS v4 | Dark theme, glassmorphism |
-| **ASR** | whisper-rs | Local speech recognition |
-| **Embeddings** | ONNX Runtime | BGE-small vectors |
-| **Database** | SQLite + FTS5 | Full-text search |
-| **Audio** | cpal | Cross-platform capture |
-
-<br/>
-
----
-
-## 🛠️ Development
-
-### Prerequisites
+### Getting Started Locally
 
 ```bash
-# Node.js 18+
-node --version  # v18.0.0+
-
-# Rust (latest stable)
-rustc --version  # 1.75.0+
-
-# CMake (for whisper.cpp)
-cmake --version  # 3.20+
-```
-
-<details>
-<summary><b>Install CMake</b></summary>
-
-```bash
-# macOS
-brew install cmake
-
-# Windows
-choco install cmake
-
-# Linux
-sudo apt install cmake
-```
-
-</details>
-
-### Quick Start
-
-```bash
-# Clone
+# 1. Clone the project
 git clone https://github.com/Phantom-Ear/phantom-ear.git
 cd phantom-ear
 
-# Install dependencies
+# 2. Install Node dependencies
 npm install
 
-# Run in development mode
+# 3. Spin up the Tauri Dev Server
 npm run tauri dev
 
-# Build for production
+# 4. Build for Production Release
 npm run tauri build
 ```
 
-<br/>
-
----
-
-## 🗺️ Roadmap
+*Note: You must have Node v18+, Rust 1.75+, and CMake (for whisper.cpp) installed.*
 
 <br/>
-
-| Status | Feature | Target |
-|--------|---------|--------|
-| ✅ | Real-time transcription | v0.1.0 |
-| ✅ | Meeting persistence | v0.1.0 |
-| ✅ | AI Q&A (RAG) | v0.1.0 |
-| ✅ | Semantic search | v0.1.0 |
-| ✅ | System tray | v0.2.0 |
-| ✅ | Transcript editing | v0.2.0 |
-| ✅ | Speaker labels | v0.2.0 |
-| 🔄 | Audio device selection | v0.3.0 |
-| 📋 | SRT subtitle export | v0.3.0 |
-| 📋 | Auto-meeting detection | v0.4.0 |
-| 📋 | Light theme | v0.4.0 |
-| 📋 | Auto-titling with AI | v0.5.0 |
-
-<br/>
-
----
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read our contributing guidelines before submitting a PR.
-
-```bash
-# Fork the repo
-# Create your feature branch
-git checkout -b feature/amazing-feature
-
-# Commit your changes
-git commit -m "Add amazing feature"
-
-# Push to the branch
-git push origin feature/amazing-feature
-
-# Open a Pull Request
-```
+PhantomEar is built by the community. Check out our ongoing Roadmap to see what we're working on next!
+1. Fork the repo.
+2. Create your feature branch (`git checkout -b feature/amazing-feature`).
+3. Commit your changes (`git commit -m "Add amazing feature"`).
+4. Push to the branch (`git push origin feature/amazing-feature`).
+5. Open a Pull Request.
 
 <br/>
 
 ---
 
-## 📄 License
+## 📄 License & Legal
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 <br/>
-
----
 
 <div align="center">
 
-### Built with 🖤 for privacy advocates
+### Built with 🖤 for privacy advocates at [fomy.io](https://fomy.io)
+
+**[⬆ Back to Top](#-phantomear-now-fomyio)**
 
 <br/>
 
-**[⬆ Back to Top](#-phantomear)**
-
-<br/>
-
-<sub>PhantomEar is not affiliated with any meeting platform. Use responsibly and in compliance with applicable laws.</sub>
+<sub>PhantomEar is not affiliated with any meeting platform (Zoom, Teams, Google Meet, etc). Please use responsibly and ensure you comply with all local and applicable laws regarding audio recording.</sub>
 
 </div>
