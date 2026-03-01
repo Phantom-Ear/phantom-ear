@@ -3320,6 +3320,7 @@ pub async fn phomy_ask_with_search(
     question: String,
     use_web_search: bool,
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     // First try to answer from meeting data
     let answer = phomy_ask(question.clone(), state.clone()).await;
@@ -3343,6 +3344,9 @@ pub async fn phomy_ask_with_search(
                 })
                 .unwrap_or(false))
     {
+        // Tell the frontend a web search has started so it can show a loading indicator
+        let _ = app.emit("phomy-web-search-started", ());
+
         // Perform web search
         let search_results = web_search(question.clone()).await?;
 
