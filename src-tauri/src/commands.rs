@@ -1620,16 +1620,24 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
     };
     let client = LlmClient::new(provider);
 
-    // ---- Route 1: "What did they just say?" / recency queries ----
-    let is_recency = q.contains("just said")
-        || q.contains("just say")
-        || q.contains("they just")
-        || q.contains("last thing")
-        || q.contains("just now")
-        || q.contains("right now")
-        || (q.contains("what") && q.contains("just"));
+    let intent_result = client.classify_phomy_intent(&q).await;
+    let fallback_intent = crate::llm::PhomyIntent {
+        intent: "SPECIFIC_QUERY".to_string(),
+        time_minutes: None,
+    };
+    
+    let intent = match intent_result {
+        Ok(i) => i,
+        Err(e) => {
+            log::warn!("Failed to classify intent: {}, falling back to search", e);
+            fallback_intent
+        }
+    };
+    
+    log::info!("Phomy interpreted intent: {} (mins: {:?})", intent.intent, intent.time_minutes);
 
-    if is_recency {
+    // ---- Route 1: "What did they just say?" / recency queries ----
+    if intent.intent == "RECENCY" {
         // Use live transcript (last ~10 chunks) or active meeting
         let context = {
             let is_recording = *state.is_recording.lock().await;
@@ -1681,8 +1689,8 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
     }
 
     // ---- Route 2: Time-based queries ("last 5 minutes", "past 10 minutes") ----
-    let time_minutes = extract_time_minutes(&q);
-    if let Some(mins) = time_minutes {
+    if intent.intent == "TIME_WINDOW" {
+        let mins = intent.time_minutes.unwrap_or(5); // Default to 5 if LLM fails to extract
         let context = {
             let is_recording = *state.is_recording.lock().await;
             let active_mid = state.active_meeting_id.lock().await.clone();
@@ -1741,11 +1749,7 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
     }
 
     // ---- Route 3: Meeting recall ("last meeting", "previous meeting") ----
-    let is_recall = q.contains("last meeting")
-        || q.contains("previous meeting")
-        || q.contains("most recent meeting");
-
-    if is_recall {
+    if intent.intent == "RECALL_LAST" {
         let meetings = state
             .db
             .get_recent_meetings_with_summaries(1)
@@ -1784,14 +1788,7 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
     }
 
     // ---- Route 4: Global/weekly summaries ("this week", "all meetings", "overall") ----
-    let is_global = q.contains("this week")
-        || q.contains("all meetings")
-        || q.contains("overall")
-        || q.contains("week cover")
-        || q.contains("meetings about")
-        || q.contains("my meetings");
-
-    if is_global {
+    if intent.intent == "GLOBAL_SUMMARY" {
         let meetings = state
             .db
             .get_recent_meetings_with_summaries(10)
@@ -1824,7 +1821,38 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
             .map_err(|e| format!("LLM error: {}", e));
     }
 
-    // ---- Default: semantic search across all meetings (existing behavior) ----
+    // ---- Route 5 (NEW): Action Items ----
+    if intent.intent == "ACTION_ITEMS" {
+        let meetings = state
+            .db
+            .get_recent_meetings_with_summaries(10)
+            .map_err(|e| format!("DB error: {}", e))?;
+
+        if meetings.is_empty() {
+            return Err("No completed meetings found to check for action items.".to_string());
+        }
+
+        let context: String = meetings
+            .iter()
+            .map(|(_, title, created_at, summary)| {
+                if let Some(s) = summary {
+                    format!("--- {} ({}) ---\n{}\n", title, created_at, s)
+                } else {
+                    String::new()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let system = "You are Phomy, a helpful meeting assistant. The user is asking about their action items, tasks, or to-dos. Extract and list all relevant action items from the provided meeting summaries. Be organized and concise.";
+        let user = format!("Meeting summaries:\n{}\n\nQuestion: {}", context, question);
+        return client
+            .complete(system, &user)
+            .await
+            .map_err(|e| format!("LLM error: {}", e));
+    }
+
+    // ---- Default: semantic search across all meetings (SPECIFIC_QUERY) ----
     let limit = 10;
     let semantic_context: Option<String> = {
         let query_emb = {
@@ -1865,25 +1893,6 @@ pub async fn phomy_ask(question: String, state: State<'_, AppState>) -> Result<S
         .complete(system, &user)
         .await
         .map_err(|e| format!("LLM error: {}", e))
-}
-
-/// Extract time in minutes from natural language (e.g., "last 5 minutes" → 5)
-fn extract_time_minutes(q: &str) -> Option<i64> {
-    use std::str::FromStr;
-    // Patterns: "last N minutes", "past N minutes", "last N mins"
-    let patterns = ["last ", "past "];
-    for pat in &patterns {
-        if let Some(idx) = q.find(pat) {
-            let after = &q[idx + pat.len()..];
-            let num_str: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(n) = i64::from_str(&num_str) {
-                if after.contains("minute") || after.contains("min") {
-                    return Some(n);
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Generate meeting summary using LLM
