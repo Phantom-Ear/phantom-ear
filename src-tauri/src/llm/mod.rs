@@ -182,7 +182,7 @@ impl LlmClient {
     /// Answer a question about the meeting
     pub async fn answer_question(&self, context: &str, question: &str) -> Result<String> {
         let system = "You are a helpful assistant answering questions about a meeting. \
-                      Use only the provided context to answer. If the answer isn't in the context, say so.";
+                      Use only the provided context to answer. If the answer isn't in the context, explicitly say NO_CONTEXT_FOUND.";
         let user = format!("Context:\n{}\n\nQuestion: {}", context, question);
         self.complete(system, &user).await
     }

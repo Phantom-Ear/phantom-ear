@@ -3329,7 +3329,18 @@ pub async fn phomy_ask_with_search(
         && (answer.is_err()
             || answer
                 .as_ref()
-                .map(|a| a.contains("No meeting"))
+                .map(|a| {
+                    let lower = a.to_lowercase();
+                    lower.contains("no meeting")
+                        || lower.contains("not in the context")
+                        || lower.contains("does not include information")
+                        || lower.contains("does not contain any information")
+                        || lower.contains("not mentioned")
+                        || lower.contains("no information")
+                        || lower.contains("cannot answer")
+                        || lower.contains("not provide information")
+                        || lower.contains("no_context_found")
+                })
                 .unwrap_or(false))
     {
         // Perform web search
