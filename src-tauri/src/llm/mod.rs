@@ -390,6 +390,43 @@ If nothing mentioned, return: []";
         // Return empty if parsing fails
         Ok(vec![])
     }
+
+    /// Classify the user's intent for a Phomy question
+    pub async fn classify_phomy_intent(&self, question: &str) -> Result<PhomyIntent> {
+        let system = r#"You are an intent classifier for a meeting assistant bot named Phomy.
+Analyze the user's question and determine the intent category.
+
+Categories:
+- RECENCY: Asking about what was just said, or very recent transcript (e.g., "what did they just say?", "what was the last thing?").
+- TIME_WINDOW: Asking about a specific time window in the past (e.g., "what happened in the last 10 minutes?"). You MUST extract the timeframe in minutes if this is chosen.
+- RECALL_LAST: Asking about the last/previous entire meeting (e.g., "what did we discuss last meeting?").
+- GLOBAL_SUMMARY: Asking about multiple meetings, overall summaries, or a timeframe encompassing multiple meetings (e.g., "summarize this week's meetings", "overall what are we working on").
+- ACTION_ITEMS: Asking specifically about action items, tasks, or to-dos that need completing (e.g., "do I have any action items?", "what are my tasks?").
+- SPECIFIC_QUERY: Asking a specific semantic question that requires searching the database (e.g., "when is the deadline for project X?", "what did Sarah say about the budget?"). Use this as the default fallback.
+
+Return ONLY a valid JSON object matching this structure:
+{
+  "intent": "CATEGORY_NAME_HERE",
+  "time_minutes": null
+}
+If intent is TIME_WINDOW, set time_minutes to an integer, otherwise null.
+
+Do not include markdown blocks, just the raw JSON."#;
+
+        let user = format!("Question: {}", question);
+        let result = self.complete(system, &user).await?;
+
+        // Extract JSON
+        let json_str = result.trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        // Try to parse direct
+        serde_json::from_str::<PhomyIntent>(json_str)
+            .map_err(|e| anyhow!("Failed to parse intent JSON: {} - raw: {}", e, json_str))
+    }
 }
 
 /// Result of checking a single note against transcript
@@ -409,4 +446,11 @@ pub struct MeetingMetadata {
     pub decisions: Vec<String>,
     #[serde(rename = "participant_count_estimate")]
     pub participant_count_estimate: i32,
+}
+
+/// Phomy recognized query intent
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PhomyIntent {
+    pub intent: String,
+    pub time_minutes: Option<i64>,
 }
