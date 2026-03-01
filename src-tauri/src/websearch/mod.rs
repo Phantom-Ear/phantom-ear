@@ -48,7 +48,7 @@ impl WebSearchClient {
         self.parse_results(&html, max_results)
     }
 
-    /// Parse DuckDuckGo HTML results - simplified version
+    /// Parse DuckDuckGo HTML results - unwraps redirect URLs
     fn parse_results(&self, html: &str, max_results: usize) -> Result<Vec<SearchResult>> {
         let mut results = Vec::new();
 
@@ -62,18 +62,34 @@ impl WebSearchClient {
                 break;
             }
 
-            let url = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+            let mut url = cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
             let title = cap.get(2).map(|m| m.as_str()).unwrap_or("");
 
-            // Skip DuckDuckGo internal URLs
+            // Attempt to unwrap duckduckgo redirect URLs
+            if url.contains("duckduckgo.com/l/?uddg=") {
+                if let Some(start_idx) = url.find("uddg=") {
+                    let encoded_url = &url[start_idx + 5..];
+                    if let Some(end_idx) = encoded_url.find('&') {
+                        url = urlencoding::decode(&encoded_url[..end_idx])
+                            .map(|cow| cow.into_owned())
+                            .unwrap_or_else(|_| url);
+                    } else {
+                        url = urlencoding::decode(encoded_url)
+                            .map(|cow| cow.into_owned())
+                            .unwrap_or_else(|_| url);
+                    }
+                }
+            }
+
+            // Skip invalid or internal URLs
             if url.contains("duckduckgo.com") || url.is_empty() {
                 continue;
             }
 
             results.push(SearchResult {
                 title: title.to_string(),
-                url: url.to_string(),
-                snippet: String::new(),
+                url,
+                snippet: String::new(), // You can also extract snippets if needed
             });
         }
 
@@ -84,5 +100,23 @@ impl WebSearchClient {
 impl Default for WebSearchClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duckduckgo_redirect() {
+        let client = WebSearchClient::new();
+        let html = r#"
+            <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.speedtest.net%2F&amp;rut=446f6d">Speedtest by Ookla</a>
+        "#;
+
+        let results = client.parse_results(html, 1).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Speedtest by Ookla");
+        assert_eq!(results[0].url, "https://www.speedtest.net/");
     }
 }
