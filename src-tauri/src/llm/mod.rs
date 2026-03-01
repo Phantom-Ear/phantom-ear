@@ -439,7 +439,10 @@ Do not include markdown blocks, just the raw JSON."#;
             }
         }
 
-        Err(anyhow!("Failed to parse intent JSON from raw: {}", json_str))
+        Err(anyhow!(
+            "Failed to parse intent JSON from raw: {}",
+            json_str
+        ))
     }
 }
 
