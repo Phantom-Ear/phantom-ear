@@ -417,15 +417,29 @@ Do not include markdown blocks, just the raw JSON."#;
         let result = self.complete(system, &user).await?;
 
         // Extract JSON
-        let json_str = result.trim()
+        let json_str = result.trim();
+        let json_str = json_str
             .trim_start_matches("```json")
             .trim_start_matches("```")
             .trim_end_matches("```")
             .trim();
 
-        // Try to parse direct
-        serde_json::from_str::<PhomyIntent>(json_str)
-            .map_err(|e| anyhow!("Failed to parse intent JSON: {} - raw: {}", e, json_str))
+        // Try direct parse first
+        if let Ok(intent) = serde_json::from_str::<PhomyIntent>(json_str) {
+            return Ok(intent);
+        }
+
+        // Try to extract JSON object from response if there's surrounding text
+        if let Some(start) = json_str.find('{') {
+            if let Some(end) = json_str.rfind('}') {
+                let json = &json_str[start..=end];
+                if let Ok(intent) = serde_json::from_str::<PhomyIntent>(json) {
+                    return Ok(intent);
+                }
+            }
+        }
+
+        Err(anyhow!("Failed to parse intent JSON from raw: {}", json_str))
     }
 }
 
@@ -449,8 +463,29 @@ pub struct MeetingMetadata {
 }
 
 /// Phomy recognized query intent
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PhomyIntent {
     pub intent: String,
     pub time_minutes: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_phomy_intent_success() {
+        let raw_json = r#"{"intent": "RECENCY", "time_minutes": null}"#;
+        let intent: PhomyIntent = serde_json::from_str(raw_json).unwrap();
+        assert_eq!(intent.intent, "RECENCY");
+        assert_eq!(intent.time_minutes, None);
+    }
+
+    #[test]
+    fn test_parse_phomy_intent_time_window() {
+        let raw_json = r#"{"intent": "TIME_WINDOW", "time_minutes": 15}"#;
+        let intent: PhomyIntent = serde_json::from_str(raw_json).unwrap();
+        assert_eq!(intent.intent, "TIME_WINDOW");
+        assert_eq!(intent.time_minutes, Some(15));
+    }
 }

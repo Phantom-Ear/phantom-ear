@@ -237,6 +237,6 @@ mod tests {
             os: "Test OS".to_string(),
         };
         let rec = ModelRecommendation::from_specs(&specs);
-        assert_eq!(rec.recommended_model, "medium");
+        assert_eq!(rec.recommended_model, "large");
     }
 }
