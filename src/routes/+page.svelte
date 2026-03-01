@@ -907,7 +907,7 @@
       phomyReferences = refs;
 
       // Use Phomy to answer questions (web search fallback is built-in)
-      const ans = await invoke<string>("phomy_ask", { question: q });
+      const ans = await invoke<string>("phomy_ask_with_search", { question: q, useWebSearch: true });
       phomyAnswer = ans;
       phomyHistory = [...phomyHistory, { role: 'assistant', text: ans, refs }];
       
@@ -954,7 +954,7 @@
       const refs = await meetingsStore.semanticSearch(lastUserMsg.text, undefined, newLimit);
       phomyReferences = refs;
 
-      const ans = await invoke<string>("phomy_ask", { question: lastUserMsg.text });
+      const ans = await invoke<string>("phomy_ask_with_search", { question: lastUserMsg.text, useWebSearch: true });
       phomyAnswer = ans;
       phomyHistory = [
         ...phomyHistory.slice(0, -1),
